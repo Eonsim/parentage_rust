@@ -1,0 +1,12 @@
+[package]
+name = "parentage_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rayon = "1.10.0"
+rust-htslib = "0.47.0"
+
+[profile.release]
+#lto = "fat"
+#codegen-units = 1
