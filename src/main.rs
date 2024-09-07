@@ -68,7 +68,6 @@ fn findparents(child:i32,
     allowed_errors: &i32,
     pos_parents: &HashSet<i32>,
     ages: &HashMap<i32,i16>,
-    //ped: &HashMap<i32,(i32,i32,i8,i16)>,
     inform_snp: &HashMap<i32,i32>
     ) -> Vec<(i32,i32,i32,i32,f64)> {
     /* For possible parents First check pedpar if it matches return
@@ -80,8 +79,7 @@ fn findparents(child:i32,
         let paridx: &i32 = popmap.get(ped_parent).unwrap();
         let pargt : &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
         let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
-
-        if my_pedpar.3 >= MINMATCH{
+        if my_pedpar.3 >= MINMATCH {
             matches.push((*ped_parent,my_pedpar.0,my_pedpar.1,my_pedpar.2,my_pedpar.3));
             return matches
         } else {
@@ -93,13 +91,31 @@ fn findparents(child:i32,
 
     if global {
         for par in pos_parents{
-            if ages.contains_key(par) && popmap.contains_key(par) && agecheck(ages.get(&child).unwrap(), ages.get(par).unwrap()) && inform_snp.get(popmap.get(par).unwrap()).unwrap() >= &DISCOVERY{
+            if let Some(paridx) = popmap.get(par){
+                if let Some(cage) = ages.get(&child) {
+                    if let Some(page) = ages.get(par) {
+                        if let Some(infsnp) = inform_snp.get(paridx){
+                            if (agecheck(cage,page) && infsnp >= &DISCOVERY){
+                                let pargt : &Vec<i8>= pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+                                let pos_par: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, &allowed_errors);
+                                if pos_par.3 >= POSMATCH {
+                                    matches.push((*par,pos_par.0,pos_par.1,pos_par.2,pos_par.3));
+                                }
+                            }
+                        }
+                    }
+
+                }
+            }
+            /*
+            //if ages.contains_key(par) && popmap.contains_key(par) && agecheck(ages.get(&child).unwrap(), ages.get(par).unwrap()) && inform_snp.get(popmap.get(par).unwrap()).unwrap() >= &DISCOVERY{
+            if popmap.contains_key(par) && agecheck(ages.get(&child).expect(0), ages.get(par).unwrap()) && inform_snp.get(popmap.get(par).unwrap()).unwrap() >= &DISCOVERY{
                 let pargt : &Vec<i8>= pop_gts.get(*popmap.get(par).unwrap() as usize).expect("couldn't unwrap");
                 let pos_par: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, &allowed_errors);
                 if pos_par.3 >= POSMATCH {
                     matches.push((*par,pos_par.0,pos_par.1,pos_par.2,pos_par.3));
                 }
-            }
+            }*/
         }
     }
     matches
