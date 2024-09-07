@@ -7,6 +7,8 @@ use std::fs::File;
 use std::i32;
 use std::io::BufRead;
 use std::io::BufReader;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 //use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::simd::prelude::*;
@@ -41,7 +43,7 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32,i32,i32,f64) {
     while start < psize && fails < tmperror{
         suminf += i32::from(child[start].abs() * parent[start].abs());
         sumdifinf += i32::from(child[start] * parent[start]);
-        fails = suminf - sumdifinf;
+        fails += suminf - sumdifinf;
         start += 1;
     }
 
@@ -214,6 +216,8 @@ fn main() {
     let chunk_size = (jobsize / threads).max(1);
     eprintln!("Starting algorithm at {:?}", startt.elapsed());
     let algo_time = Instant::now();
+    let mut rng = thread_rng();
+    anmls_list.shuffle(&mut rng);
 
     anmls_list.par_chunks(chunk_size).for_each(|chunk| {
         let tx: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = tx.clone();
