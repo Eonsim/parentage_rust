@@ -267,7 +267,10 @@ fn main() {
 
     let jobsize = anmls_list.len();
     let chunk_size = (jobsize / threads).max(1);
+    eprintln!("Starting algorithm at {:?}", startt.elapsed());
     let algo_time = Instant::now();
+    let mut rng = thread_rng();
+    anmls_list.shuffle(&mut rng);
 
     anmls_list.par_chunks(chunk_size).for_each(|chunk| {
         let results = Arc::clone(&results);
