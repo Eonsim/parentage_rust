@@ -167,7 +167,7 @@ fn main() {
             if first {
                 let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
                 for an in tmpanmls.skip(9) {
-                    anml_lookup.insert(an.parse::<i32>().unwrap(), count);
+                    anml_lookup.entry(an.parse::<i32>().unwrap()).or_insert(count);
                     inform.insert(count, 0);
                     let blank: Vec<i8> = vec![];
                     genotypes.push(blank);
