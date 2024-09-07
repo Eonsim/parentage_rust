@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![feature(let_chains)]
 use rust_htslib::bgzf::Reader;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -75,8 +76,8 @@ fn findparents(child:i32,
     */
     let mut matches : Vec<(i32,i32,i32,i32,f64)> = vec![];
     let mut global : bool = false;
-    if *ped_parent != 0i32 && popmap.contains_key(ped_parent){
-        let paridx: &i32 = popmap.get(ped_parent).unwrap();
+    if *ped_parent != 0i32 && let Some(paridx) = popmap.get(ped_parent){
+        //let paridx: &i32 = popmap.get(ped_parent).unwrap();
         let pargt : &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
         let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
         if my_pedpar.3 >= MINMATCH {
@@ -95,7 +96,7 @@ fn findparents(child:i32,
                 if let Some(cage) = ages.get(&child) {
                     if let Some(page) = ages.get(par) {
                         if let Some(infsnp) = inform_snp.get(paridx){
-                            if (agecheck(cage,page) && infsnp >= &DISCOVERY){
+                            if agecheck(cage,page) && infsnp >= &DISCOVERY {
                                 let pargt : &Vec<i8>= pop_gts.get(*paridx as usize).expect("couldn't unwrap");
                                 let pos_par: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, &allowed_errors);
                                 if pos_par.3 >= POSMATCH {
