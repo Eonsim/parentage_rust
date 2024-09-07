@@ -259,20 +259,19 @@ fn main() {
     }
 
     use rayon::prelude::*;
-    use std::sync::mpsc;
-    let (tx, rx) = mpsc::channel();
-    let (txd, rxd) = mpsc::channel();
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    let results = Arc::new(Mutex::new(HashMap::new()));
+    let dam_results = Arc::new(Mutex::new(HashMap::new()));
 
     let jobsize = anmls_list.len();
     let chunk_size = (jobsize / threads).max(1);
-    eprintln!("Starting algorithm at {:?}", startt.elapsed());
     let algo_time = Instant::now();
-    let mut rng = thread_rng();
-    anmls_list.shuffle(&mut rng);
 
     anmls_list.par_chunks(chunk_size).for_each(|chunk| {
-        let tx: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = tx.clone();
-        //let txd: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = txd.clone();
+        let results = Arc::clone(&results);
+        let dam_results = Arc::clone(&dam_results);
         for ban in chunk {
             if let Some(bidx) = anml_lookup.get(ban) {
                 let bchild_gt: &Vec<i8> = &genotypes[*bidx as usize];
@@ -292,39 +291,6 @@ fn main() {
                             &ages,
                             &inform,
                         );
-                        /*let dam_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
-                            *ban,
-                            &bchild_gt,
-                            &fam.1,
-                            &anml_lookup,
-                            &genotypes,
-                            &maxerr,
-                            &sorted_dams,
-                            &ages,
-                            &inform,
-                        );*/
-                        if sire_res.len() > 0 {
-                            tx.send((*ban, sire_res)).expect("Thread error");
-                        }
-                        //f dam_res.len() > 0 {
-                        //    txd.send((*ban, dam_res)).expect("Thread error");
-                        //}
-                    }
-                }
-            }
-        }
-    });
-
-    anmls_list.par_chunks(chunk_size).for_each(|chunk| {
-        let txd: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = txd.clone();
-        for ban in chunk {
-            if let Some(bidx) = anml_lookup.get(ban) {
-                let bchild_gt: &Vec<i8> = &genotypes[*bidx as usize];
-                if let Some(inf_markers) = inform.get(bidx) {
-                    let maxerr: i32 = (f64::from(*inf_markers) * MAXERRORS) as i32;
-                    if let Some(fam) = ped.get(ban)
-                        && *inf_markers >= MINMARKERS
-                    {
                         let dam_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
                             *ban,
                             &bchild_gt,
@@ -336,8 +302,13 @@ fn main() {
                             &ages,
                             &inform,
                         );
-                        if dam_res.len() > 0 {
-                            txd.send((*ban, dam_res)).expect("Thread error");
+                        if !sire_res.is_empty() {
+                            let mut results = results.lock().unwrap();
+                            results.insert(*ban, sire_res);
+                        }
+                        if !dam_res.is_empty() {
+                            let mut dam_results = dam_results.lock().unwrap();
+                            dam_results.insert(*ban, dam_res);
                         }
                     }
                 }
@@ -351,11 +322,15 @@ fn main() {
         startt.elapsed(),
         threads
     );
-    drop(tx);
-    drop(txd);
 
-    let results: HashMap<_, _> = rx.into_iter().collect();
-    let resultd: HashMap<_, _> = rxd.into_iter().collect();
+    let results = Arc::try_unwrap(results)
+        .expect("Lock still has multiple owners")
+        .into_inner()
+        .expect("Mutex cannot be locked");
+    let dam_results = Arc::try_unwrap(dam_results)
+        .expect("Lock still has multiple owners")
+        .into_inner()
+        .expect("Mutex cannot be locked");
 
     for an in anmls_list {
         let mut my_sires: &Vec<(i32, i32, i32, i32, f64)> = &vec![];
@@ -363,7 +338,7 @@ fn main() {
         if let Some(sires) = results.get(&an) {
             my_sires = sires;
         }
-        if let Some(dams) = resultd.get(&an) {
+        if let Some(dams) = dam_results.get(&an) {
             my_dams = dams;
         }
         println!("{} s{:?} d{:?}", an, my_sires, my_dams);
