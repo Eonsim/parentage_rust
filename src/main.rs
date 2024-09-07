@@ -272,7 +272,7 @@ fn main() {
 
     anmls_list.par_chunks(chunk_size).for_each(|chunk| {
         let tx: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = tx.clone();
-        //let txd: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = txd.clone();
+        let txd: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = txd.clone();
         for ban in chunk {
             if let Some(bidx) = anml_lookup.get(ban) {
                 let bchild_gt: &Vec<i8> = &genotypes[*bidx as usize];
@@ -292,39 +292,6 @@ fn main() {
                             &ages,
                             &inform,
                         );
-                        /*let dam_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
-                            *ban,
-                            &bchild_gt,
-                            &fam.1,
-                            &anml_lookup,
-                            &genotypes,
-                            &maxerr,
-                            &sorted_dams,
-                            &ages,
-                            &inform,
-                        );*/
-                        if sire_res.len() > 0 {
-                            tx.send((*ban, sire_res)).expect("Thread error");
-                        }
-                        //f dam_res.len() > 0 {
-                        //    txd.send((*ban, dam_res)).expect("Thread error");
-                        //}
-                    }
-                }
-            }
-        }
-    });
-
-    anmls_list.par_chunks(chunk_size).for_each(|chunk| {
-        let txd: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = txd.clone();
-        for ban in chunk {
-            if let Some(bidx) = anml_lookup.get(ban) {
-                let bchild_gt: &Vec<i8> = &genotypes[*bidx as usize];
-                if let Some(inf_markers) = inform.get(bidx) {
-                    let maxerr: i32 = (f64::from(*inf_markers) * MAXERRORS) as i32;
-                    if let Some(fam) = ped.get(ban)
-                        && *inf_markers >= MINMARKERS
-                    {
                         let dam_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
                             *ban,
                             &bchild_gt,
@@ -336,6 +303,9 @@ fn main() {
                             &ages,
                             &inform,
                         );
+                        if sire_res.len() > 0 {
+                            tx.send((*ban, sire_res)).expect("Thread error");
+                        }
                         if dam_res.len() > 0 {
                             txd.send((*ban, dam_res)).expect("Thread error");
                         }
@@ -344,7 +314,6 @@ fn main() {
             }
         }
     });
-
     eprintln!(
         "Algo time {:?}, total time {:?} with {} threads",
         algo_time.elapsed(),
