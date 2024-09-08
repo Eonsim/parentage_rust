@@ -68,7 +68,7 @@ fn agecheck(kid: &i16, par: &i16) -> bool {
     *kid - *par >= 2i16
 }
 
-fn findparents(
+fn findparents1(
     child: i32,
     childgt: &[i8],
     ped_parent: &i32,
@@ -199,6 +199,63 @@ fn findparents2(
     matches
 }
 
+fn findparents(
+    child: i32,
+    childgt: &[i8],
+    ped_parent: &i32,
+    popmap: &HashMap<i32, i32>,
+    pop_gts: &[Vec<i8>],
+    allowed_errors: &i32,
+    pos_parents: &BTreeSet<(i16, i32)>,
+    ages: &HashMap<i32, i16>,
+    inform_snp: &HashMap<i32, i32>,
+) -> Vec<(i32, i32, i32, i32, f64)> {
+    let mut matches = Vec::new();
+    let mut global = false;
+
+    if *ped_parent != 0 {
+        if let Some(&paridx) = popmap.get(ped_parent) {
+            let pargt = &pop_gts[paridx as usize];
+            let my_pedpar = vec_pars(childgt, pargt, allowed_errors);
+            if my_pedpar.3 >= MINMATCH {
+                matches.push((*ped_parent, my_pedpar.0, my_pedpar.1, my_pedpar.2, my_pedpar.3));
+                return matches;
+            } else {
+                global = true;
+            }
+        } else {
+            global = true;
+        }
+    } else {
+        global = true;
+    }
+
+    if global {
+        for &(age, parent) in pos_parents {
+            if let Some(&paridx) = popmap.get(&parent) {
+                if let Some(&cage) = ages.get(&child) {
+                    if agecheck(&cage, &age) {
+                        if let Some(&infsnp) = inform_snp.get(&paridx) {
+                            if infsnp >= DISCOVERY {
+                                let pargt = &pop_gts[paridx as usize];
+                                let pos_par = vec_pars(childgt, pargt, allowed_errors);
+                                if pos_par.3 >= POSMATCH {
+                                    matches.push((parent, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
+                                }
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    matches
+}
+
+
 #[inline]
 fn conv(gt: &str) -> (i8, i8) {
     match gt {
@@ -239,17 +296,19 @@ fn main() {
     let mut inform: HashMap<i32, i32> = HashMap::new();
 
     for line in reader.lines() {
-        let dat: String = line.unwrap();
-        if !dat.contains("##") {
+        //let dat: String = line.unwrap();
+        let dat = line.expect("Failed to read line");
+        if !dat.starts_with("##"){// contains("##") {
             if first {
                 let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
                 for an in tmpanmls.skip(9) {
                     anml_lookup
-                        .entry(an.parse::<i32>().unwrap())
+                        .entry(an.parse::<i32>().expect("Failed to parse"))
                         .or_insert(count);
                     inform.insert(count, 0);
-                    let blank: Vec<i8> = vec![];
-                    genotypes.push(blank);
+                    genotypes.push(Vec::new());
+                    //let blank: Vec<i8> = vec![];
+                    //genotypes.push(blank);
                     count += 1;
                 }
                 first = false;
@@ -257,7 +316,7 @@ fn main() {
                 count = 0;
                 let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
                 for tmpgt in tmpgts.skip(9) {
-                    let gtconv: (i8, i8) = conv(&tmpgt);
+                    let gtconv: (i8, i8) = conv(tmpgt);
                     *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
                     genotypes[count as usize].push(gtconv.0);
                     count += 1;
