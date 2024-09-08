@@ -68,8 +68,72 @@ fn agecheck(kid: &i16, par: &i16) -> bool {
     *kid - *par >= 2i16
 }
 
-/* Need, child, childgt, popmap, popgt, errors, ages,parent list*/
 fn findparents(
+    child: i32,
+    childgt: &[i8],
+    ped_parent: &i32,
+    popmap: &HashMap<i32, i32>,
+    pop_gts: &Vec<Vec<i8>>,
+    allowed_errors: &i32,
+    pos_parents: &BTreeSet<(i16, i32)>,
+    ages: &HashMap<i32, i16>,
+    inform_snp: &HashMap<i32, i32>,
+) -> Vec<(i32, i32, i32, i32, f64)> {
+    let mut matches: Vec<(i32, i32, i32, i32, f64)> = vec![];
+    let mut global: bool = false;
+
+    // Efficiently check for the pedigree parent
+    if *ped_parent != 0i32 && let Some(paridx) = popmap.get(ped_parent) {
+        let pargt: &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+        let my_pedpar = vec_pars(&childgt, &pargt, allowed_errors);
+        if my_pedpar.3 >= MINMATCH {
+            matches.push((
+                *ped_parent,
+                my_pedpar.0,
+                my_pedpar.1,
+                my_pedpar.2,
+                my_pedpar.3,
+            ));
+            return matches;
+        } else {
+            global = true;
+        }
+    } else {
+        global = true;
+    }
+
+    // Optimize the loop over possible parents
+    if global {
+        // Use an iterator to avoid unnecessary allocations
+        let mut pos_parents_iter = pos_parents.iter();
+        while let Some(&par) = pos_parents_iter.next() {
+            if let Some(paridx) = popmap.get(&par.1) {
+                if let Some(cage) = ages.get(&child) {
+                    if agecheck(cage, &par.0) {
+                        if let Some(infsnp) = inform_snp.get(paridx) {
+                            if infsnp >= &DISCOVERY {
+                                let pargt: &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+                                let pos_par = vec_pars(&childgt, &pargt, &allowed_errors);
+                                if pos_par.3 >= POSMATCH {
+                                    matches
+                                        .push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
+                                }
+                            }
+                        }
+                    } else {
+                        // Parents are sorted by age, so break early
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    matches
+}
+
+/* Need, child, childgt, popmap, popgt, errors, ages,parent list*/
+fn findparents2(
     child: i32,
     childgt: &[i8],
     ped_parent: &i32,
