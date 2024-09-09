@@ -144,7 +144,12 @@ fn findparents(
 fn conv(gt: &str) -> (i8, i8) {
     match gt {
         "0/0" => return (-1i8, 1),
+        "0/1" => return (0i8, 1),
         "1/1" => return (1i8, 1),
+        "0|0" => return (-1i8, 1),
+        "0|1" => return (0i8, 1),
+        "1|0" => return (0i8, 1),
+        "1|1" => return (1i8, 1),
         _ => return (0i8, 0),
     }
 }
