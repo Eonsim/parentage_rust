@@ -11,16 +11,18 @@ use std::fs::File;
 use std::i32;
 use std::io::BufRead;
 use std::io::BufReader;
-//use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::simd::prelude::*;
 use std::time::Instant;
 const LANES: usize = 64;
 const MINMARKERS: i32 = 90;
 const MAXERRORS: f64 = 0.04;
-const MINMATCH: f64 = 0.99;
+//const MINMATCH: f64 = 0.99;
 const POSMATCH: f64 = 0.97;
 const DISCOVERY: i32 = 300;
+const VER_MAX_ERR: i32 = 3;
+const MIN_INF_MARKERS: i32 = 20;
 
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
@@ -91,7 +93,9 @@ fn findparents(
         //let paridx: &i32 = popmap.get(ped_parent).unwrap();
         let pargt: &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
         let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
-        if my_pedpar.3 >= MINMATCH {
+        let used_markers = my_pedpar.0 + my_pedpar.1;
+        if my_pedpar.1 <= VER_MAX_ERR && used_markers >= MIN_INF_MARKERS {
+            //MINMATCH {
             matches.push((
                 *ped_parent,
                 my_pedpar.0,
@@ -118,7 +122,8 @@ fn findparents(
                                     pop_gts.get(*paridx as usize).expect("couldn't unwrap");
                                 let pos_par: (i32, i32, i32, f64) =
                                     vec_pars(&childgt, &pargt, &allowed_errors);
-                                if pos_par.3 >= POSMATCH {
+                                let used_markers = pos_par.0 + pos_par.1;
+                                if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
                                     matches
                                         .push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
                                 }
@@ -326,7 +331,14 @@ fn main() {
     let results: HashMap<_, _> = rx.into_iter().collect();
     let resultd: HashMap<_, _> = rxd.into_iter().collect();
 
-    for an in anmls_list {
+    //fn out_write(mywrite: &BufWriter, data: &Vec<(i32, i32, i32, i32, f64)>) {}
+
+    let fout = File::create("parentage_rust.csv").expect("Couldn't create file");
+    let mut owrite = BufWriter::new(fout);
+    let header = "ANML_KEY,SIRE_VER,DAM_VER,SIRE_NUM,DAM_NUM,SIRE_MATCH_1,SIRE_1_INFORM,SIRE_1_PASS_RATE,DAM_MATCH_1,DAM_1_INFOM,DAM_1_PASS_RATE,SIRE_MATCH_2,SIRE_2_INFORM,SIRE_2_PASS_RATE,DAM_MATCH_2,DAM_2_INFOM,DAM_2_PASS_RATE\n";
+    write!(owrite, "{}", header).expect("Can't write header");
+
+    /*for an in anmls_list {
         let mut my_sires: &Vec<(i32, i32, i32, i32, f64)> = &vec![];
         let mut my_dams: &Vec<(i32, i32, i32, i32, f64)> = &vec![];
         if let Some(sires) = results.get(&an) {
@@ -335,6 +347,109 @@ fn main() {
         if let Some(dams) = resultd.get(&an) {
             my_dams = dams;
         }
+
         println!("{} s{:?} d{:?}", an, my_sires, my_dams);
+    }*/
+
+    for an in anmls_list {
+        if let Some(fam) = ped.get(&an) {
+            let mut my_sires: Vec<(i32, i32, i32, i32, f64)> = vec![];
+            let mut my_dams: Vec<(i32, i32, i32, i32, f64)> = vec![];
+            if let Some(sires) = results.get(&an) {
+                my_sires = sires.clone();
+                my_sires.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            }
+            if let Some(dams) = resultd.get(&an) {
+                my_dams = dams.clone();
+                my_dams.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            }
+            let ped_sire = fam.0;
+            let ped_dam = fam.1;
+            let savail = anml_lookup.contains_key(&ped_sire);
+            let davail = anml_lookup.contains_key(&ped_dam);
+            write!(
+                owrite,
+                "{},{},{},{},{}",
+                an,
+                savail as i32,
+                davail as i32,
+                my_sires.len(),
+                my_dams.len()
+            )
+            .expect("Can't write to file");
+            for i in 0..3 {
+                if i < my_sires.len() {
+                    if let Some(smatch) = my_sires.get(i) {
+                        write!(owrite, ",{},{},{}", smatch.0, smatch.1 + smatch.2, smatch.4)
+                            .expect("Can't write to file");
+                    } else {
+                        write!(owrite, ",0,0,0").expect("Can't write to file");
+                    }
+                } else {
+                    write!(owrite, ",0,0,0").expect("Can't write to file");
+                }
+                if i < my_dams.len() {
+                    if let Some(dmatch) = my_sires.get(usize::from(i)) {
+                        write!(owrite, ",{},{},{}", dmatch.0, dmatch.1 + dmatch.2, dmatch.4)
+                            .expect("Can't write to file");
+                    } else {
+                        write!(owrite, ",0,0,0").expect("Can't write to file");
+                    }
+                } else {
+                    write!(owrite, ",0,0,0").expect("Can't write to file");
+                }
+            }
+            write!(owrite, "\n").expect("Can't write to file");
+        }
     }
+
+    owrite.flush().expect("Couldn't save file to disk");
+    println!("Write finished");
 }
+
+/*
+if (coutput) {
+      for (child <- kids) {
+        val kid = pedMap(child)
+        val pedSire = pedigree(child)._1
+        val pedDam = pedigree(child)._2
+        val pedSireRes =
+          if (pedSire == 0 || !gtMap.contains(pedSire)) then (0, 0, 0, 0.0)
+          else parmatch(gtData(gtMap(child)), 9000, gtData(gtMap(pedSire)))
+        val pedDamRes =
+          if (pedDam == 0 || !gtMap.contains(pedDam)) then (0, 0, 0, 0.0)
+          else parmatch(gtData(gtMap(child)), 9000, gtData(gtMap(pedDam)))
+        val savail = gtMap.contains(pedSire)
+        val davail = gtMap.contains(pedDam)
+        val infSire = if (savail) inform(gtMap(pedSire)) else 0
+        val infDam = if (davail) inform(gtMap(pedDam)) else 0
+        bhout.write(s"${child},${if (savail) then 1 else 0},${
+            if (davail) then 1 else 0
+          },${sireRes(kid).size},${damRes(kid).size}")
+        // Match Key, Match inform (Good + bad), Match Pass
+        val sireMatches =
+          if (sireRes(kid).size > 8) then
+            sireRes(kid).filter(_._5 > 0.99).sortBy(-_._5).slice(0, 8)
+          else sireRes(kid)
+        val damMatches =
+          if (damRes(kid).size > 8) then
+            damRes(kid).filter(_._5 > 0.99).sortBy(-_._5).slice(0, 8)
+          else damRes(kid)
+        for (i <- Range(0, 8)) {
+          // Need to output Trio results first
+          if (i < sireMatches.size) {
+            /* Parent,Good,Bad,Uninform,PassRate*/
+            val smtch = sireMatches(i)
+            bhout.write(s",${smtch._1},${smtch._2 + smtch._3},${smtch._5}")
+          } else {
+            bhout.write(",0,0,0")
+          }
+          if (i < damMatches.size) {
+            /* Parent,Good,Bad,Uninform,PassRate*/
+            val dmtch = damMatches(i)
+            bhout.write(s",${dmtch._1},${dmtch._2 + dmtch._3},${dmtch._5}")
+          } else {
+            bhout.write(",0,0,0")
+          }
+        }
+        */
