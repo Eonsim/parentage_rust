@@ -114,10 +114,10 @@ fn findparents(
     if global {
         for par in pos_parents {
             if let Some(paridx) = popmap.get(&par.1) {
-                if let Some(cage) = ages.get(&child) {
-                    if agecheck(cage, &par.0) {
-                        if let Some(infsnp) = inform_snp.get(paridx) {
-                            if infsnp >= &DISCOVERY {
+                if let Some(infsnp) = inform_snp.get(paridx) {
+                    if infsnp >= &DISCOVERY {
+                        if let Some(cage) = ages.get(&child) {
+                            if agecheck(cage, &par.0) {
                                 let pargt: &Vec<i8> =
                                     pop_gts.get(*paridx as usize).expect("couldn't unwrap");
                                 let pos_par: (i32, i32, i32, f64) =
@@ -146,10 +146,10 @@ fn conv(gt: &str) -> (i8, i8) {
         "0/0" => return (-1i8, 1),
         "0/1" => return (0i8, 1),
         "1/1" => return (1i8, 1),
-        "0|0" => return (-1i8, 1),
-        "0|1" => return (0i8, 1),
-        "1|0" => return (0i8, 1),
-        "1|1" => return (1i8, 1),
+        //"0|0" => return (-1i8, 1),
+        //"0|1" => return (0i8, 1),
+        //"1|0" => return (0i8, 1),
+        //"1|1" => return (1i8, 1),
         _ => return (0i8, 0),
     }
 }
@@ -176,7 +176,7 @@ fn main() {
     let ped_file: &String = &args[3];
     let file: &Path = Path::new(&vcf);
     let reader: BufReader<Reader> = BufReader::new(Reader::from_path(file).unwrap());
-    let mut first: bool = true;
+    //let mut first: bool = true;
     let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
     let mut genotypes: Vec<Vec<i8>> = vec![];
     let mut count: i32 = 0;
@@ -187,7 +187,7 @@ fn main() {
     for line in reader.lines() {
         let dat: String = line.unwrap();
         if !dat.starts_with("##") {
-            if first {
+            if dat.starts_with("#C") {
                 let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
                 for an in tmpanmls.skip(9) {
                     anml_lookup
@@ -198,7 +198,6 @@ fn main() {
                     genotypes.push(blank);
                     count += 1;
                 }
-                first = false;
             } else {
                 count = 0;
                 let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
