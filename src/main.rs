@@ -110,7 +110,9 @@ fn findparents(
 
     if global {
         for par in pos_parents {
-            if let Some(paridx) = popmap.get(&par.1) {
+            if let Some(paridx) = popmap.get(&par.1)
+                && child != par.1
+            {
                 if let Some(infsnp) = inform_snp.get(paridx) {
                     if infsnp >= &DISCOVERY {
                         if let Some(cage) = ages.get(&child) {
