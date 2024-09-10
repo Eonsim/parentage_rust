@@ -364,7 +364,7 @@ fn main() {
 
     let fout = File::create("parentage_rust.csv").expect("Couldn't create file");
     let mut owrite = BufWriter::new(fout);
-    let header = "ANML_KEY,SIRE_VER,DAM_VER,SIRE_NUM,DAM_NUM,SIRE_MATCH_1,SIRE_1_INFORM,SIRE_1_PASS_RATE,DAM_MATCH_1,DAM_1_INFOM,DAM_1_PASS_RATE,SIRE_MATCH_2,SIRE_2_INFORM,SIRE_2_PASS_RATE,DAM_MATCH_2,DAM_2_INFOM,DAM_2_PASS_RATE\n";
+    let header = "Animal_Key,Sire_Verification_Code,Dam_Verification_Code,Number_Sire_Matches,Number_Dam_Matches,Sire_Match_1,Sire_Match_1_Number_Informative_SNP,Sire_Match_1_Pass_Rate,Dam_Match_1,Dam_Match_1_Number_Informative_SNP,Dam_Match_1_Pass_Rate,Sire_Match_2,Sire_Match_2_Number_Informative_SNP,Sire_Match_2_Pass_Rate,Dam_Match_2,Dam_Match_2_Number_Informative_SNP,Dam_Match_2_Pass_Rate\n";
     write!(owrite, "{}", header).expect("Can't write header");
 
     for an in anmls_list {
