@@ -204,7 +204,7 @@ fn main() {
     let genotypesp: Arc<Mutex<Vec<Vec<i8>>>> = Arc::new(Mutex::new(genotypes));
     let informp: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
 
-    // Process each line in parallel
+    // Process each line in parallel not well
     buffer.par_lines().for_each(|line| {
         if !line.starts_with('#') {
             let mut count = 0;
