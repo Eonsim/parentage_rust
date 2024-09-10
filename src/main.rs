@@ -179,7 +179,7 @@ fn main() {
     reader.read_to_string(&mut buffer).expect("couldn't read");
 
     let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
-    let mut genotypes: Vec<Vec<i8>> = vec![];
+    //let mut genotypes: Vec<Vec<i8>> = vec![];
     let mut count: i32 = 0;
     eprintln!("Loading VCF");
 
@@ -189,54 +189,60 @@ fn main() {
         if dat.starts_with("#C") {
             let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
             for an in tmpanmls.skip(9) {
-                anml_lookup
-                    .entry(an.parse::<i32>().unwrap())
-                    .or_insert(count);
-                let blank: Vec<i8> = vec![];
-                genotypes.push(blank);
+                anml_lookup.entry(an.parse::<i32>().unwrap()).or_insert(count);
+                //let blank: Vec<i8> = vec![];
+                //genotypes.push(blank);
                 count += 1;
             }
             break; // Exit after processing header
         }
     }
+    let ans_num = count;
+    // Convert the buffer into a vector of lines
+    let lines: Vec<&str> = buffer.lines().collect();
 
-    // Wrap shared data in Arc and Mutex for parallel processing
-    let genotypesp: Arc<Mutex<Vec<Vec<i8>>>> = Arc::new(Mutex::new(genotypes));
-    let informp: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
+    // Create channels for communicating results from threads
+    let (genotypes_tx, genotypes_rx) = mpsc::channel::<(usize, i8)>();
+    let (inform_tx, inform_rx) = mpsc::channel::<(i32, i32)>();
 
-    // Process each line in parallel not well
-    buffer.par_lines().for_each(|line| {
-        if !line.starts_with('#') {
-            let mut count = 0;
-            let tmpgts = line.split('\t');
+    // Process chunks of lines in parallel
+    let chunk_size = (1907 / threads)); // Define the chunk size (adjust based on your workload)
+    lines.par_chunks(chunk_size).for_each_with((genotypes_tx, inform_tx), |(genotypes_tx, inform_tx), chunk| {
+        let mut local_updates: Vec<(i32, i8, i8)> = Vec::new();
 
-            let mut local_updates: Vec<(i32, i8, i8)> = Vec::new();
+        for line in chunk {
+            if !line.starts_with('#') {
+                let mut count = 0;
+                let tmpgts = line.split('\t');
 
-            for tmpgt in tmpgts.skip(9) {
-                let gtconv = conv(tmpgt);
-                local_updates.push((count, gtconv.0, gtconv.1));
-                count += 1;
-            }
-
-            {
-                let mut local_inform = informp.lock().unwrap();
-                for (count, _, inform_value) in &local_updates {
-                    *local_inform.entry(*count).or_insert(0) += i32::from(*inform_value);
-                }
-            }
-
-            {
-                let mut local_genotypes = genotypesp.lock().unwrap();
-                for (count, genotype_value, _) in local_updates {
-                    local_genotypes[count as usize].push(genotype_value);
+                for tmpgt in tmpgts.skip(9) {
+                    let gtconv = conv(tmpgt);
+                    local_updates.push((count, gtconv.0, gtconv.1));
+                    count += 1;
                 }
             }
         }
+
+        // Send updates to the main thread using the channels
+        for (count, genotype_value, inform_value) in local_updates {
+            genotypes_tx.send((count as usize, genotype_value)).expect("Failed to send genotype data");
+            inform_tx.send((count, inform_value as i32)).expect("Failed to send inform data");
+        }
     });
 
-    // Safely extract the final results from Arc
-    let genotypes = Arc::clone(&genotypesp).lock().unwrap().clone();
-    let inform = Arc::clone(&informp).lock().unwrap().clone();
+    // Initialize the structures to collect results
+    let mut genotypes: Vec<Vec<i8>> = vec![vec![]; ans_num];
+    let mut inform: HashMap<i32, i32> = HashMap::new();
+
+    // Collect results from the genotype channel
+    for (index, value) in genotypes_rx {
+        genotypes[index].push(value);
+    }
+
+    // Collect results from the inform channel
+    for (count, value) in inform_rx {
+        *inform.entry(count).or_insert(0) += value;
+    }
 
     /*
             for line in reader.lines() {
