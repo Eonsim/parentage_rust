@@ -2,7 +2,6 @@
 #![feature(let_chains)]
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use rayon::prelude::*;
 use rust_htslib::bgzf::Reader;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -12,11 +11,9 @@ use std::fs::File;
 use std::i32;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::Read;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::simd::prelude::*;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 const LANES: usize = 64;
 const MINMARKERS: i32 = 90;
@@ -147,6 +144,10 @@ fn conv(gt: &str) -> (i8, i8) {
         "0/0" => return (-1i8, 1),
         "0/1" => return (0i8, 1),
         "1/1" => return (1i8, 1),
+        //"0|0" => return (-1i8, 1),
+        //"0|1" => return (0i8, 1),
+        //"1|0" => return (0i8, 1),
+        //"1|1" => return (1i8, 1),
         _ => return (0i8, 0),
     }
 }
@@ -172,88 +173,42 @@ fn main() {
     let anmls_file: &String = &args[2];
     let ped_file: &String = &args[3];
     let file: &Path = Path::new(&vcf);
-    //let reader: BufReader<Reader> = BufReader::new(Reader::from_path(file).unwrap());
+    let reader: BufReader<Reader> = BufReader::new(Reader::from_path(file).unwrap());
     //let mut first: bool = true;
-    let mut buffer = String::new();
-    let mut reader = BufReader::new(Reader::from_path(file).unwrap());
-    reader.read_to_string(&mut buffer).expect("couldn't read");
-
     let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
     let mut genotypes: Vec<Vec<i8>> = vec![];
     let mut count: i32 = 0;
     eprintln!("Loading VCF");
+    /* Store number of informative markers */
+    let mut inform: HashMap<i32, i32> = HashMap::new();
 
-    // Find and process the header line
-    for line in buffer.lines() {
-        let dat: String = line.to_string();
-        if dat.starts_with("#C") {
-            let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
-            for an in tmpanmls.skip(9) {
-                anml_lookup
-                    .entry(an.parse::<i32>().unwrap())
-                    .or_insert(count);
-                let blank: Vec<i8> = vec![];
-                genotypes.push(blank);
-                count += 1;
+    for line in reader.lines() {
+        let dat: String = line.unwrap();
+        if !dat.starts_with("##") {
+            if dat.starts_with("#C") {
+                let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
+                for an in tmpanmls.skip(9) {
+                    anml_lookup
+                        .entry(an.parse::<i32>().unwrap())
+                        .or_insert(count);
+                    inform.insert(count, 0);
+                    let blank: Vec<i8> = vec![];
+                    genotypes.push(blank);
+                    count += 1;
+                }
+            } else {
+                count = 0;
+                let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
+                for tmpgt in tmpgts.skip(9) {
+                    let gtconv: (i8, i8) = conv(&tmpgt);
+                    *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
+                    genotypes[count as usize].push(gtconv.0);
+                    count += 1;
+                }
             }
-            break; // Exit after processing header
         }
     }
 
-    // Wrap shared data in Arc and Mutex for parallel processing
-    let genotypesp: Arc<Mutex<Vec<Vec<i8>>>> = Arc::new(Mutex::new(genotypes));
-    let informp: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
-
-    // Process each line in parallel
-    buffer.par_lines().for_each(|line| {
-        if !line.starts_with('#') {
-            let mut count = 0;
-            let tmpgts = line.split('\t');
-
-            let mut local_updates: Vec<(i32, i8, i8)> = Vec::new();
-
-            for tmpgt in tmpgts.skip(9) {
-                let gtconv = conv(tmpgt);
-                local_updates.push((count, gtconv.0, gtconv.1));
-                count += 1;
-            }
-
-            {
-                let mut local_inform = informp.lock().unwrap();
-                for (count, _, inform_value) in &local_updates {
-                    *local_inform.entry(*count).or_insert(0) += i32::from(*inform_value);
-                }
-            }
-
-            {
-                let mut local_genotypes = genotypesp.lock().unwrap();
-                for (count, genotype_value, _) in local_updates {
-                    local_genotypes[count as usize].push(genotype_value);
-                }
-            }
-        }
-    });
-
-    // Safely extract the final results from Arc
-    let genotypes = Arc::clone(&genotypesp).lock().unwrap().clone();
-    let inform = Arc::clone(&informp).lock().unwrap().clone();
-
-    /*
-            for line in reader.lines() {
-                let dat: String = line.unwrap();
-                if !dat.starts_with("#") {
-                    count = 0;
-                    let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
-                    for tmpgt in tmpgts.skip(9) {
-                        let gtconv: (i8, i8) = conv(&tmpgt);
-                        *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
-                        genotypes[count as usize].push(gtconv.0);
-                        count += 1;
-                    }
-                }
-            }
-        }
-    */
     /*for line in reader.lines() {
         let dat: String = line.unwrap();
         if !dat.starts_with("##") {
@@ -339,6 +294,7 @@ fn main() {
         }
     }
 
+    use rayon::prelude::*;
     use std::sync::mpsc;
     let (tx, rx) = mpsc::channel();
     let (txd, rxd) = mpsc::channel();
@@ -437,17 +393,24 @@ fn main() {
                 my_dams.len()
             )
             .expect("Can't write to file");
-
-            for i in 0..2 {
-                if let Some(smatch) = my_sires.get(i) {
-                    write!(owrite, ",{},{},{}", smatch.0, smatch.1 + smatch.2, smatch.4)
-                        .expect("Can't write to file");
+            for i in 0..3 {
+                if i < my_sires.len() {
+                    if let Some(smatch) = my_sires.get(i) {
+                        write!(owrite, ",{},{},{}", smatch.0, smatch.1 + smatch.2, smatch.4)
+                            .expect("Can't write to file");
+                    } else {
+                        write!(owrite, ",0,0,0").expect("Can't write to file");
+                    }
                 } else {
                     write!(owrite, ",0,0,0").expect("Can't write to file");
                 }
-                if let Some(dmatch) = my_dams.get(i) {
-                    write!(owrite, ",{},{},{}", dmatch.0, dmatch.1 + dmatch.2, dmatch.4)
-                        .expect("Can't write to file");
+                if i < my_dams.len() {
+                    if let Some(dmatch) = my_sires.get(usize::from(i)) {
+                        write!(owrite, ",{},{},{}", dmatch.0, dmatch.1 + dmatch.2, dmatch.4)
+                            .expect("Can't write to file");
+                    } else {
+                        write!(owrite, ",0,0,0").expect("Can't write to file");
+                    }
                 } else {
                     write!(owrite, ",0,0,0").expect("Can't write to file");
                 }
