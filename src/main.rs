@@ -23,9 +23,9 @@ const MINMARKERS: i32 = 90;
 const MAXERRORS: f64 = 0.04;
 //const MINMATCH: f64 = 0.99;
 const POSMATCH: f64 = 0.97;
-const DISCOVERY: i32 = 200;
+const DISCOVERY: i32 = 300;
 const VER_MAX_ERR: i32 = 3;
-const MIN_INF_MARKERS: i32 = 18;
+const MIN_INF_MARKERS: i32 = 20;
 
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
