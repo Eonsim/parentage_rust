@@ -209,34 +209,6 @@ fn main() {
         }
     }
 
-    /*for line in reader.lines() {
-        let dat: String = line.unwrap();
-        if !dat.starts_with("##") {
-            if first {
-                let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
-                for an in tmpanmls.skip(9) {
-                    anml_lookup
-                        .entry(an.parse::<i32>().unwrap())
-                        .or_insert(count);
-                    inform.insert(count, 0);
-                    let blank: Vec<i8> = vec![];
-                    genotypes.push(blank);
-                    count += 1;
-                }
-                first = false;
-            } else {
-                count = 0;
-                let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
-                for tmpgt in tmpgts.skip(9) {
-                    let gtconv: (i8, i8) = conv(&tmpgt);
-                    *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
-                    genotypes[count as usize].push(gtconv.0);
-                    count += 1;
-                }
-            }
-        }
-    }*/
-
     let tfile: File = File::open(&anmls_file).expect("Failed to read animal file");
     let mut anmls_list: Vec<i32> = vec![];
     let areader: BufReader<File> = BufReader::new(tfile);
@@ -393,24 +365,17 @@ fn main() {
                 my_dams.len()
             )
             .expect("Can't write to file");
-            for i in 0..3 {
-                if i < my_sires.len() {
-                    if let Some(smatch) = my_sires.get(i) {
-                        write!(owrite, ",{},{},{}", smatch.0, smatch.1 + smatch.2, smatch.4)
-                            .expect("Can't write to file");
-                    } else {
-                        write!(owrite, ",0,0,0").expect("Can't write to file");
-                    }
+
+            for i in 0..2 {
+                if let Some(smatch) = my_sires.get(i) {
+                    write!(owrite, ",{},{},{}", smatch.0, smatch.1 + smatch.2, smatch.4)
+                        .expect("Can't write to file");
                 } else {
                     write!(owrite, ",0,0,0").expect("Can't write to file");
                 }
-                if i < my_dams.len() {
-                    if let Some(dmatch) = my_sires.get(usize::from(i)) {
-                        write!(owrite, ",{},{},{}", dmatch.0, dmatch.1 + dmatch.2, dmatch.4)
-                            .expect("Can't write to file");
-                    } else {
-                        write!(owrite, ",0,0,0").expect("Can't write to file");
-                    }
+                if let Some(dmatch) = my_dams.get(i) {
+                    write!(owrite, ",{},{},{}", dmatch.0, dmatch.1 + dmatch.2, dmatch.4)
+                        .expect("Can't write to file");
                 } else {
                     write!(owrite, ",0,0,0").expect("Can't write to file");
                 }
