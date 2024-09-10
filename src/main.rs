@@ -86,8 +86,8 @@ fn findparents(
         Otherwise if age is correct and parent has enough markers then parent match
     */
     let mut matches: Vec<(i32, i32, i32, i32, f64)> = vec![];
-    let mut global: bool = false;
-    if *ped_parent != 0i32
+    let mut global: bool = true;
+    if *ped_parent != 0
         && let Some(paridx) = popmap.get(ped_parent)
     {
         //let paridx: &i32 = popmap.get(ped_parent).unwrap();
@@ -103,12 +103,9 @@ fn findparents(
                 my_pedpar.2,
                 my_pedpar.3,
             ));
+            global = false;
             return matches;
-        } else {
-            global = true;
         }
-    } else {
-        global = true;
     }
 
     if global {
@@ -127,11 +124,10 @@ fn findparents(
                                     matches
                                         .push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
                                 }
+                            } else {
+                                break;
                             }
                         }
-                    } else {
-                        //Parents are sorted by age once one fails they all will
-                        break;
                     }
                 }
             }
