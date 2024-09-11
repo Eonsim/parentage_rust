@@ -23,6 +23,7 @@ const POSMATCH: f64 = 0.97;
 const DISCOVERY: i32 = 300;
 const VER_MAX_ERR: i32 = 3;
 const MIN_INF_MARKERS: i32 = 20;
+const MAX_MARKERS: usize = 1907;
 
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
@@ -40,7 +41,6 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
         let pvec: Simd<i8, LANES> = Simd::<i8, LANES>::from_slice(&parent[start..end]);
         suminf += i32::from((cvec.abs() * pvec.abs()).reduce_sum());
         sumdifinf += i32::from((cvec * pvec).reduce_sum());
-        //fails += suminf - sumdifinf; // should it be fails = as the sums are already acumulating
         fails = suminf - sumdifinf;
         end += inc;
         start += inc;
@@ -49,7 +49,6 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
     while start < psize && fails < tmperror {
         suminf += i32::from(child[start].abs() * parent[start].abs());
         sumdifinf += i32::from(child[start] * parent[start]);
-        //fails += suminf - sumdifinf;
         fails = suminf - sumdifinf;
         start += 1;
     }
@@ -90,7 +89,6 @@ fn findparents(
     if *ped_parent != 0
         && let Some(paridx) = popmap.get(ped_parent)
     {
-        //let paridx: &i32 = popmap.get(ped_parent).unwrap();
         let pargt: &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
         let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
         let used_markers = my_pedpar.0 + my_pedpar.1;
@@ -174,17 +172,17 @@ fn main() {
     let ped_file: &String = &args[3];
     let file: &Path = Path::new(&vcf);
     let reader: BufReader<Reader> = BufReader::new(Reader::from_path(file).unwrap());
-    //let mut first: bool = true;
     let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
-    let mut genotypes: Vec<Vec<i8>> = vec![];
     let mut count: i32 = 0;
     eprintln!("Loading VCF");
     /* Store number of informative markers */
+    let mut genotypes: Vec<Vec<i8>> = vec![];
     let mut inform: HashMap<i32, i32> = HashMap::new();
+    let mut header: bool = true;
 
     for line in reader.lines() {
         let dat: String = line.unwrap();
-        if !dat.starts_with("##") {
+        if header {
             if dat.starts_with("#C") {
                 let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
                 for an in tmpanmls.skip(9) {
@@ -192,19 +190,19 @@ fn main() {
                         .entry(an.parse::<i32>().unwrap())
                         .or_insert(count);
                     inform.insert(count, 0);
-                    let blank: Vec<i8> = vec![];
-                    genotypes.push(blank);
                     count += 1;
                 }
-            } else {
-                count = 0;
-                let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
-                for tmpgt in tmpgts.skip(9) {
-                    let gtconv: (i8, i8) = conv(&tmpgt);
-                    *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
-                    genotypes[count as usize].push(gtconv.0);
-                    count += 1;
-                }
+                genotypes = vec![Vec::with_capacity(MAX_MARKERS); anml_lookup.len()];
+                header = false;
+            }
+        } else {
+            count = 0;
+            let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
+            for tmpgt in tmpgts.skip(9) {
+                let gtconv: (i8, i8) = conv(&tmpgt);
+                *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
+                genotypes[count as usize].push(gtconv.0);
+                count += 1;
             }
         }
     }
