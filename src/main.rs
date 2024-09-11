@@ -179,7 +179,6 @@ fn main() {
     reader.read_to_string(&mut buffer).expect("couldn't read");
 
     let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
-    let mut genotypes: Vec<Vec<i8>> = vec![];
     let mut count: i32 = 0;
     eprintln!("Loading VCF");
 
@@ -192,14 +191,13 @@ fn main() {
                 anml_lookup
                     .entry(an.parse::<i32>().unwrap())
                     .or_insert(count);
-                //let blank: Vec<i8> = vec![];
-                genotypes.push(vec![]);
+                //genotypes.push(vec![]);
                 count += 1;
             }
             break; // Exit after processing header
         }
     }
-
+    let mut genotypes: Vec<Vec<i8>> = vec![Vec::with_capacity(MAX)];
     // Wrap shared data in Arc and Mutex for parallel processing
     let genotypesp: Arc<Mutex<Vec<Vec<i8>>>> = Arc::new(Mutex::new(genotypes));
     let informp: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
