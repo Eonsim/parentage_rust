@@ -11,16 +11,19 @@ use std::fs::File;
 use std::i32;
 use std::io::BufRead;
 use std::io::BufReader;
-//use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::simd::prelude::*;
 use std::time::Instant;
 const LANES: usize = 64;
 const MINMARKERS: i32 = 90;
 const MAXERRORS: f64 = 0.04;
-const MINMATCH: f64 = 0.99;
+//const MINMATCH: f64 = 0.99;
 const POSMATCH: f64 = 0.97;
 const DISCOVERY: i32 = 300;
+const VER_MAX_ERR: i32 = 3;
+const MIN_INF_MARKERS: i32 = 20;
+const MAX_MARKERS: usize = 1907;
 
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
@@ -38,7 +41,6 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
         let pvec: Simd<i8, LANES> = Simd::<i8, LANES>::from_slice(&parent[start..end]);
         suminf += i32::from((cvec.abs() * pvec.abs()).reduce_sum());
         sumdifinf += i32::from((cvec * pvec).reduce_sum());
-        //fails += suminf - sumdifinf; // should it be fails = as the sums are already acumulating
         fails = suminf - sumdifinf;
         end += inc;
         start += inc;
@@ -47,7 +49,6 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
     while start < psize && fails < tmperror {
         suminf += i32::from(child[start].abs() * parent[start].abs());
         sumdifinf += i32::from(child[start] * parent[start]);
-        //fails += suminf - sumdifinf;
         fails = suminf - sumdifinf;
         start += 1;
     }
@@ -83,15 +84,16 @@ fn findparents(
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
     */
-    let mut matches: Vec<(i32, i32, i32, i32, f64)> = vec![];
-    let mut global: bool = false;
-    if *ped_parent != 0i32
+    let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(1);
+    let mut global: bool = true;
+    if *ped_parent != 0
         && let Some(paridx) = popmap.get(ped_parent)
     {
-        //let paridx: &i32 = popmap.get(ped_parent).unwrap();
         let pargt: &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
         let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
-        if my_pedpar.3 >= MINMATCH {
+        let used_markers = my_pedpar.0 + my_pedpar.1;
+        if my_pedpar.1 <= VER_MAX_ERR && used_markers >= MIN_INF_MARKERS {
+            //MINMATCH {
             matches.push((
                 *ped_parent,
                 my_pedpar.0,
@@ -99,34 +101,33 @@ fn findparents(
                 my_pedpar.2,
                 my_pedpar.3,
             ));
+            global = false;
             return matches;
-        } else {
-            global = true;
         }
-    } else {
-        global = true;
     }
 
     if global {
         for par in pos_parents {
-            if let Some(paridx) = popmap.get(&par.1) {
-                if let Some(cage) = ages.get(&child) {
-                    if agecheck(cage, &par.0) {
-                        if let Some(infsnp) = inform_snp.get(paridx) {
-                            if infsnp >= &DISCOVERY {
+            if let Some(paridx) = popmap.get(&par.1)
+                && child != par.1
+            {
+                if let Some(infsnp) = inform_snp.get(paridx) {
+                    if infsnp >= &DISCOVERY {
+                        if let Some(cage) = ages.get(&child) {
+                            if agecheck(cage, &par.0) {
                                 let pargt: &Vec<i8> =
                                     pop_gts.get(*paridx as usize).expect("couldn't unwrap");
                                 let pos_par: (i32, i32, i32, f64) =
                                     vec_pars(&childgt, &pargt, &allowed_errors);
-                                if pos_par.3 >= POSMATCH {
+                                let used_markers = pos_par.0 + pos_par.1;
+                                if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
                                     matches
                                         .push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
                                 }
+                            } else {
+                                break;
                             }
                         }
-                    } else {
-                        //Parents are sorted by age once one fails they all will
-                        break;
                     }
                 }
             }
@@ -139,7 +140,12 @@ fn findparents(
 fn conv(gt: &str) -> (i8, i8) {
     match gt {
         "0/0" => return (-1i8, 1),
+        "0/1" => return (0i8, 1),
         "1/1" => return (1i8, 1),
+        //"0|0" => return (-1i8, 1),
+        //"0|1" => return (0i8, 1),
+        //"1|0" => return (0i8, 1),
+        //"1|1" => return (1i8, 1),
         _ => return (0i8, 0),
     }
 }
@@ -166,43 +172,43 @@ fn main() {
     let ped_file: &String = &args[3];
     let file: &Path = Path::new(&vcf);
     let reader: BufReader<Reader> = BufReader::new(Reader::from_path(file).unwrap());
-    let mut first: bool = true;
-    let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
-    let mut genotypes: Vec<Vec<i8>> = vec![];
+    let mut anml_lookup: HashMap<i32, i32> = HashMap::with_capacity(300000);
     let mut count: i32 = 0;
     eprintln!("Loading VCF");
     /* Store number of informative markers */
-    let mut inform: HashMap<i32, i32> = HashMap::new();
+    let mut genotypes: Vec<Vec<i8>> = vec![];
+    let mut inform: HashMap<i32, i32> = HashMap::with_capacity(300000);
+    let mut header: bool = true;
 
     for line in reader.lines() {
         let dat: String = line.unwrap();
-        if !dat.contains("##") {
-            if first {
+        if header {
+            if dat.starts_with("#C") {
                 let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
                 for an in tmpanmls.skip(9) {
                     anml_lookup
                         .entry(an.parse::<i32>().unwrap())
                         .or_insert(count);
                     inform.insert(count, 0);
-                    let blank: Vec<i8> = vec![];
-                    genotypes.push(blank);
                     count += 1;
                 }
-                first = false;
-            } else {
-                count = 0;
-                let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
-                for tmpgt in tmpgts.skip(9) {
-                    let gtconv: (i8, i8) = conv(&tmpgt);
-                    *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
-                    genotypes[count as usize].push(gtconv.0);
-                    count += 1;
-                }
+                genotypes = vec![Vec::with_capacity(MAX_MARKERS); anml_lookup.len()];
+                header = false;
+            }
+        } else {
+            count = 0;
+            let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
+            for tmpgt in tmpgts.skip(9) {
+                let gtconv: (i8, i8) = conv(&tmpgt);
+                *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
+                genotypes[count as usize].push(gtconv.0);
+                count += 1;
             }
         }
     }
+
     let tfile: File = File::open(&anmls_file).expect("Failed to read animal file");
-    let mut anmls_list: Vec<i32> = vec![];
+    let mut anmls_list: Vec<i32> = Vec::with_capacity(anml_lookup.len());
     let areader: BufReader<File> = BufReader::new(tfile);
     eprintln!("Loading target anmls after {:?}", startt.elapsed());
 
@@ -211,11 +217,11 @@ fn main() {
     }
 
     let pfile = File::open(&ped_file).expect("Failed to read ped file");
-    let mut sires_list: HashSet<i32> = HashSet::new();
-    let mut dams_list: HashSet<i32> = HashSet::new();
-    let mut ages: HashMap<i32, i16> = HashMap::new();
+    let mut sires_list: HashSet<i32> = HashSet::with_capacity(anml_lookup.len() / 30);
+    let mut dams_list: HashSet<i32> = HashSet::with_capacity(anml_lookup.len());
+    let mut ages: HashMap<i32, i16> = HashMap::with_capacity(anml_lookup.len());
     /* Sire, Dam, Sex, Birth*/
-    let mut ped: HashMap<i32, (i32, i32, i8, i16)> = HashMap::new();
+    let mut ped: HashMap<i32, (i32, i32, i8, i16)> = HashMap::with_capacity(anml_lookup.len());
     let preader: BufReader<File> = BufReader::new(pfile);
     eprintln!("Loading pedigree after {:?}", startt.elapsed());
 
@@ -262,8 +268,8 @@ fn main() {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    let results = Arc::new(Mutex::new(HashMap::new()));
-    let dam_results = Arc::new(Mutex::new(HashMap::new()));
+    let results = Arc::new(Mutex::new(HashMap::with_capacity(anml_lookup.len())));
+    let dam_results = Arc::new(Mutex::new(HashMap::with_capacity(anml_lookup.len())));
 
     let jobsize = anmls_list.len();
     let chunk_size = (jobsize / threads).max(1);
@@ -335,15 +341,56 @@ fn main() {
         .into_inner()
         .expect("Mutex cannot be locked");
 
+    let fout = File::create("parentage_rust.csv").expect("Couldn't create file");
+    let mut owrite = BufWriter::new(fout);
+    let header = "Animal_Key,Sire_Verification_Code,Dam_Verification_Code,Number_Sire_Matches,Number_Dam_Matches,Sire_Match_1,Sire_Match_1_Number_Informative_SNP,Sire_Match_1_Pass_Rate,Dam_Match_1,Dam_Match_1_Number_Informative_SNP,Dam_Match_1_Pass_Rate,Sire_Match_2,Sire_Match_2_Number_Informative_SNP,Sire_Match_2_Pass_Rate,Dam_Match_2,Dam_Match_2_Number_Informative_SNP,Dam_Match_2_Pass_Rate\n";
+    write!(owrite, "{}", header).expect("Can't write header");
+
     for an in anmls_list {
-        let mut my_sires: &Vec<(i32, i32, i32, i32, f64)> = &vec![];
-        let mut my_dams: &Vec<(i32, i32, i32, i32, f64)> = &vec![];
-        if let Some(sires) = results.get(&an) {
-            my_sires = sires;
+        if let Some(fam) = ped.get(&an) {
+            let mut my_sires: Vec<(i32, i32, i32, i32, f64)> = vec![];
+            let mut my_dams: Vec<(i32, i32, i32, i32, f64)> = vec![];
+            if let Some(sires) = results.get(&an) {
+                my_sires = sires.clone();
+                my_sires.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            }
+            if let Some(dams) = dam_results.get(&an) {
+                my_dams = dams.clone();
+                my_dams.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            }
+            let ped_sire = fam.0;
+            let ped_dam = fam.1;
+            let savail = anml_lookup.contains_key(&ped_sire);
+            let davail = anml_lookup.contains_key(&ped_dam);
+            write!(
+                owrite,
+                "{},{},{},{},{}",
+                an,
+                savail as i32,
+                davail as i32,
+                my_sires.len(),
+                my_dams.len()
+            )
+            .expect("Can't write to file");
+
+            for i in 0..2 {
+                if let Some(smatch) = my_sires.get(i) {
+                    write!(owrite, ",{},{},{}", smatch.0, smatch.1 + smatch.2, smatch.4)
+                        .expect("Can't write to file");
+                } else {
+                    write!(owrite, ",0,0,0").expect("Can't write to file");
+                }
+                if let Some(dmatch) = my_dams.get(i) {
+                    write!(owrite, ",{},{},{}", dmatch.0, dmatch.1 + dmatch.2, dmatch.4)
+                        .expect("Can't write to file");
+                } else {
+                    write!(owrite, ",0,0,0").expect("Can't write to file");
+                }
+            }
+            write!(owrite, "\n").expect("Can't write to file");
         }
-        if let Some(dams) = dam_results.get(&an) {
-            my_dams = dams;
-        }
-        println!("{} s{:?} d{:?}", an, my_sires, my_dams);
     }
+
+    owrite.flush().expect("Couldn't save file to disk");
+    println!("Write finished");
 }
