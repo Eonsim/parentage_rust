@@ -26,6 +26,7 @@ const POSMATCH: f64 = 0.97;
 const DISCOVERY: i32 = 300;
 const VER_MAX_ERR: i32 = 3;
 const MIN_INF_MARKERS: i32 = 20;
+const MAX_MARKERS: usize = 1907;
 
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
@@ -88,7 +89,7 @@ fn findparents(
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
     */
-    let mut matches: Vec<(i32, i32, i32, i32, f64)> = vec![];
+    let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(1);
     let mut global: bool = true;
     if *ped_parent != 0
         && let Some(paridx) = popmap.get(ped_parent)
@@ -178,7 +179,7 @@ fn main() {
     let mut reader = BufReader::new(Reader::from_path(file).unwrap());
     reader.read_to_string(&mut buffer).expect("couldn't read");
 
-    let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
+    let mut anml_lookup: HashMap<i32, i32> = HashMap::with_capacity(500000);
     let mut count: i32 = 0;
     eprintln!("Loading VCF");
 
@@ -197,10 +198,15 @@ fn main() {
             break; // Exit after processing header
         }
     }
-    let mut genotypes: Vec<Vec<i8>> = vec![Vec::with_capacity(MAX)];
+    //let genotypes: Vec<Vec<i8>> = vec![Vec::with_capacity(MAX_MARKERS); anml_lookup.len()];
     // Wrap shared data in Arc and Mutex for parallel processing
-    let genotypesp: Arc<Mutex<Vec<Vec<i8>>>> = Arc::new(Mutex::new(genotypes));
-    let informp: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
+    let genotypesp: Arc<Mutex<Vec<Vec<i8>>>> =
+        Arc::new(Mutex::new(vec![
+            Vec::with_capacity(MAX_MARKERS);
+            anml_lookup.len()
+        ]));
+    let informp: Arc<Mutex<HashMap<i32, i32>>> =
+        Arc::new(Mutex::new(HashMap::with_capacity(anml_lookup.len())));
 
     // Process each line in parallel not well
     buffer.par_lines().for_each(|line| {
@@ -239,9 +245,10 @@ fn main() {
     drop(informp);
     drop(buffer);
     drop(reader);
+
     eprintln!("Loaded VCF {:?}", startt.elapsed());
     let tfile: File = File::open(&anmls_file).expect("Failed to read animal file");
-    let mut anmls_list: Vec<i32> = vec![];
+    let mut anmls_list: Vec<i32> = Vec::with_capacity(anml_lookup.len());
     let areader: BufReader<File> = BufReader::new(tfile);
     eprintln!("Loading target anmls after {:?}", startt.elapsed());
 
@@ -250,11 +257,11 @@ fn main() {
     }
 
     let pfile = File::open(&ped_file).expect("Failed to read ped file");
-    let mut sires_list: HashSet<i32> = HashSet::new();
-    let mut dams_list: HashSet<i32> = HashSet::new();
-    let mut ages: HashMap<i32, i16> = HashMap::new();
+    let mut sires_list: HashSet<i32> = HashSet::with_capacity(anml_lookup.len() / 10);
+    let mut dams_list: HashSet<i32> = HashSet::with_capacity(anml_lookup.len());
+    let mut ages: HashMap<i32, i16> = HashMap::with_capacity(anml_lookup.len());
     /* Sire, Dam, Sex, Birth*/
-    let mut ped: HashMap<i32, (i32, i32, i8, i16)> = HashMap::new();
+    let mut ped: HashMap<i32, (i32, i32, i8, i16)> = HashMap::with_capacity(anml_lookup.len());
     let preader: BufReader<File> = BufReader::new(pfile);
 
     for line in preader.lines() {
