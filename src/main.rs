@@ -84,7 +84,7 @@ fn findparents(
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
     */
-    let mut matches: Vec<(i32, i32, i32, i32, f64)> = vec![];
+    let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(1);
     let mut global: bool = true;
     if *ped_parent != 0
         && let Some(paridx) = popmap.get(ped_parent)
@@ -172,12 +172,12 @@ fn main() {
     let ped_file: &String = &args[3];
     let file: &Path = Path::new(&vcf);
     let reader: BufReader<Reader> = BufReader::new(Reader::from_path(file).unwrap());
-    let mut anml_lookup: HashMap<i32, i32> = HashMap::new();
+    let mut anml_lookup: HashMap<i32, i32> = HashMap::with_capacity(300000);
     let mut count: i32 = 0;
     eprintln!("Loading VCF");
     /* Store number of informative markers */
     let mut genotypes: Vec<Vec<i8>> = vec![];
-    let mut inform: HashMap<i32, i32> = HashMap::new();
+    let mut inform: HashMap<i32, i32> = HashMap::with_capacity(300000);
     let mut header: bool = true;
 
     for line in reader.lines() {
@@ -208,7 +208,7 @@ fn main() {
     }
 
     let tfile: File = File::open(&anmls_file).expect("Failed to read animal file");
-    let mut anmls_list: Vec<i32> = vec![];
+    let mut anmls_list: Vec<i32> = Vec::with_capacity(anml_lookup.len());
     let areader: BufReader<File> = BufReader::new(tfile);
     eprintln!("Loading target anmls after {:?}", startt.elapsed());
 
@@ -217,11 +217,11 @@ fn main() {
     }
 
     let pfile = File::open(&ped_file).expect("Failed to read ped file");
-    let mut sires_list: HashSet<i32> = HashSet::new();
-    let mut dams_list: HashSet<i32> = HashSet::new();
-    let mut ages: HashMap<i32, i16> = HashMap::new();
+    let mut sires_list: HashSet<i32> = HashSet::with_capacity(anml_lookup.len() / 30);
+    let mut dams_list: HashSet<i32> = HashSet::with_capacity(anml_lookup.len());
+    let mut ages: HashMap<i32, i16> = HashMap::with_capacity(anml_lookup.len());
     /* Sire, Dam, Sex, Birth*/
-    let mut ped: HashMap<i32, (i32, i32, i8, i16)> = HashMap::new();
+    let mut ped: HashMap<i32, (i32, i32, i8, i16)> = HashMap::with_capacity(anml_lookup.len());
     let preader: BufReader<File> = BufReader::new(pfile);
     eprintln!("Loading pedigree after {:?}", startt.elapsed());
 
