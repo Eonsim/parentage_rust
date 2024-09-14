@@ -2,6 +2,9 @@
 #![feature(let_chains)]
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use rayon::prelude::*;
+use rust_htslib::bcf::record::GenotypeAllele::*;
+use rust_htslib::bcf::record::{Genotype, GenotypeAllele};
 use rust_htslib::bcf::{Read, Reader};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -13,6 +16,7 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::{BufWriter, Write};
 use std::simd::prelude::*;
+use std::sync::mpsc;
 use std::time::Instant;
 const LANES: usize = 64;
 const MINMARKERS: i32 = 90;
@@ -136,7 +140,7 @@ fn findparents(
 }
 
 #[inline]
-fn conv(gt: &str) -> (i8, i8) {
+fn conv(gt: &str) -> (i8, i32) {
     match gt {
         "0/0" => return (-1i8, 1),
         "0/1" => return (0i8, 1),
@@ -171,6 +175,7 @@ fn main() {
     let ped_file: &String = &args[3];
     eprintln!("Loading VCF");
     let mut bcf = Reader::from_path(vcf).expect("Error opening file.");
+    let _ = bcf.set_threads(6);
     let sample_count = usize::try_from(bcf.header().sample_count()).unwrap();
     let mut anml_lookup: HashMap<i32, usize> = HashMap::with_capacity(sample_count);
     let mut genotypes: Vec<Vec<i8>> = vec![Vec::with_capacity(MAX_MARKERS); sample_count];
@@ -192,13 +197,15 @@ fn main() {
     }
     eprintln!("Starting GT load");
 
-    for (_i, records) in bcf.records().enumerate() {
-        let record = records.expect("No record");
-        let gts = record.genotypes().iter().collect();
+    for record in bcf.records().map(|r| r.expect("No record")) {
+        let b = rust_htslib::bcf::record::Buffer::new();
+        //.enumerate() {
+        //let record = records.expect("No record");
+        let gts = record.genotypes_shared_buffer(b).expect("Can't get GTs");
+        //let mygts = rust_htslib::bcf::record::Genotype(gts);
         for sample_index in 0..sample_count {
-            //let gt = conv(&gts.get(sample_index).to_string());
-            let gt = conv(&gts.get(sample_index).to_string());
-            *inform.entry(sample_index).or_insert(0) += i32::from(gt.1);
+            let gt: (i8, i32) = conv(&gts.get(sample_index).to_string());
+            *inform.entry(sample_index).or_insert(0) += gt.1;
             genotypes[sample_index].push(gt.0);
         }
     }
@@ -261,8 +268,6 @@ fn main() {
         }
     }
 
-    use rayon::prelude::*;
-    use std::sync::mpsc;
     let (tx, rx) = mpsc::channel();
     let (txd, rxd) = mpsc::channel();
 
