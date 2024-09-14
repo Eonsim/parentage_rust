@@ -194,10 +194,7 @@ fn main() {
 
     for (_i, records) in bcf.records().enumerate() {
         let record = records.expect("No record");
-        let gts = record.genotypes().expect("Error reading genotypes");
-        for (i, g) in gts.{
-
-        }
+        let gts = record.genotypes().iter().collect();
         for sample_index in 0..sample_count {
             //let gt = conv(&gts.get(sample_index).to_string());
             let gt = conv(&gts.get(sample_index).to_string());
