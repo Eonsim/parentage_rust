@@ -2,7 +2,7 @@
 #![feature(let_chains)]
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use rust_htslib::bgzf::Reader;
+use rust_htslib::bcf::{Read, Reader};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -12,7 +12,6 @@ use std::i32;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::{BufWriter, Write};
-use std::path::Path;
 use std::simd::prelude::*;
 use std::time::Instant;
 const LANES: usize = 64;
@@ -74,12 +73,12 @@ fn findparents(
     child: i32,
     childgt: &[i8],
     ped_parent: &i32,
-    popmap: &HashMap<i32, i32>,
+    popmap: &HashMap<i32, usize>,
     pop_gts: &Vec<Vec<i8>>,
     allowed_errors: &i32,
     pos_parents: &BTreeSet<(i16, i32)>,
     ages: &HashMap<i32, i16>,
-    inform_snp: &HashMap<i32, i32>,
+    inform_snp: &HashMap<usize, i32>,
 ) -> Vec<(i32, i32, i32, i32, f64)> {
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
@@ -167,46 +166,47 @@ fn main() {
         &8
     };
 
-    let vcf: &String = &args[1];
+    let vcf: &str = &args[1];
     let anmls_file: &String = &args[2];
     let ped_file: &String = &args[3];
-    let file: &Path = Path::new(&vcf);
-    let reader: BufReader<Reader> = BufReader::new(Reader::from_path(file).unwrap());
-    let mut anml_lookup: HashMap<i32, i32> = HashMap::with_capacity(300000);
-    let mut count: i32 = 0;
     eprintln!("Loading VCF");
-    /* Store number of informative markers */
-    let mut genotypes: Vec<Vec<i8>> = vec![];
-    let mut inform: HashMap<i32, i32> = HashMap::with_capacity(300000);
-    let mut header: bool = true;
+    let mut bcf = Reader::from_path(vcf).expect("Error opening file.");
+    let sample_count = usize::try_from(bcf.header().sample_count()).unwrap();
+    let mut anml_lookup: HashMap<i32, usize> = HashMap::with_capacity(sample_count);
+    let mut genotypes: Vec<Vec<i8>> = vec![Vec::with_capacity(MAX_MARKERS); sample_count];
+    let mut inform: HashMap<usize, i32> = HashMap::with_capacity(sample_count);
+    eprintln!("Indexing animals");
+    let vcf_samples: Vec<&str> = bcf
+        .header()
+        .samples()
+        .into_iter()
+        .map(|x| std::str::from_utf8(x).expect("err"))
+        .collect();
+    for sample_idx in 0..sample_count {
+        anml_lookup.insert(
+            vcf_samples[sample_idx]
+                .parse::<i32>()
+                .expect("conversion error"),
+            sample_idx,
+        );
+    }
+    eprintln!("Starting GT load");
 
-    for line in reader.lines() {
-        let dat: String = line.unwrap();
-        if header {
-            if dat.starts_with("#C") {
-                let tmpanmls: std::str::Split<'_, &str> = dat.split("\t");
-                for an in tmpanmls.skip(9) {
-                    anml_lookup
-                        .entry(an.parse::<i32>().unwrap())
-                        .or_insert(count);
-                    inform.insert(count, 0);
-                    count += 1;
-                }
-                genotypes = vec![Vec::with_capacity(MAX_MARKERS); anml_lookup.len()];
-                header = false;
-            }
-        } else {
-            count = 0;
-            let tmpgts: std::str::Split<'_, &str> = dat.split("\t");
-            for tmpgt in tmpgts.skip(9) {
-                let gtconv: (i8, i8) = conv(&tmpgt);
-                *inform.entry(count).or_insert(0) += i32::from(gtconv.1);
-                genotypes[count as usize].push(gtconv.0);
-                count += 1;
-            }
+    for (_i, records) in bcf.records().enumerate() {
+        let record = records.expect("No record");
+        let gts = record.genotypes().expect("Error reading genotypes");
+        for (i, g) in gts.{
+
+        }
+        for sample_index in 0..sample_count {
+            //let gt = conv(&gts.get(sample_index).to_string());
+            let gt = conv(&gts.get(sample_index).to_string());
+            *inform.entry(sample_index).or_insert(0) += i32::from(gt.1);
+            genotypes[sample_index].push(gt.0);
         }
     }
 
+    eprintln!("Read VCF");
     let tfile: File = File::open(&anmls_file).expect("Failed to read animal file");
     let mut anmls_list: Vec<i32> = Vec::with_capacity(anml_lookup.len());
     let areader: BufReader<File> = BufReader::new(tfile);
