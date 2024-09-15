@@ -153,6 +153,20 @@ fn conv(gt: &str) -> (i8, i32) {
     }
 }
 
+#[inline]
+fn gtconv(gt: &[i32]) -> (i8, i32) {
+    match gt {
+        [2, 2] => return (-1i8, 1),
+        [2, 4] => return (0i8, 1),
+        [4, 4] => return (1i8, 1),
+        //"0|0" => return (-1i8, 1),
+        //"0|1" => return (0i8, 1),
+        //"1|0" => return (0i8, 1),
+        //"1|1" => return (1i8, 1),
+        _ => return (0i8, 0),
+    }
+}
+
 fn main() {
     let startt: Instant = Instant::now();
     let args: Vec<String> = env::args().collect();
@@ -198,15 +212,26 @@ fn main() {
     eprintln!("Starting GT load");
 
     for record in bcf.records().map(|r| r.expect("No record")) {
-        let b = rust_htslib::bcf::record::Buffer::new();
+        //let b = rust_htslib::bcf::record::Buffer::new();
         //.enumerate() {
         //let record = records.expect("No record");
-        let gts = record.genotypes_shared_buffer(b).expect("Can't get GTs");
+        let gts: Vec<(i8, i32)> = record
+            .format(b"GT")
+            .integer()
+            .expect("GTs error")
+            .to_vec()
+            .iter()
+            .map(|a| gtconv(a))
+            .collect();
+        //let gts = record.genotypes_shared_buffer(b).expect("Can't get GTs");
         //let mygts = rust_htslib::bcf::record::Genotype(gts);
-        for sample_index in 0..sample_count {
-            let gt: (i8, i32) = conv(&gts.get(sample_index).to_string());
-            *inform.entry(sample_index).or_insert(0) += gt.1;
-            genotypes[sample_index].push(gt.0);
+        //for sample_index in 0..sample_count {
+        for (mygt, sample_index) in gts.iter().zip(0..sample_count) {
+            //let gt: (i8, i32) = conv(&gts.get(sample_index).to_string());
+            //let gt: (i8, i32) = gtconv(gts[sample_index]);
+            //let gt: (i8, i32) = gtconv(mygt);
+            *inform.entry(sample_index).or_insert(0) += mygt.1;
+            genotypes[sample_index].push(mygt.0);
         }
     }
 
