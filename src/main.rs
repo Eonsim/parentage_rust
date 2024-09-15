@@ -82,7 +82,7 @@ fn findparents(
     allowed_errors: &i32,
     pos_parents: &BTreeSet<(i16, i32)>,
     ages: &HashMap<i32, i16>,
-    inform_snp: &HashMap<usize, i32>,
+    inform_snp: &Vec<i32>,
 ) -> Vec<(i32, i32, i32, i32, f64)> {
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
@@ -114,22 +114,20 @@ fn findparents(
             if let Some(paridx) = popmap.get(&par.1)
                 && child != par.1
             {
-                if let Some(infsnp) = inform_snp.get(paridx) {
-                    if infsnp >= &DISCOVERY {
-                        if let Some(cage) = ages.get(&child) {
-                            if agecheck(cage, &par.0) {
-                                let pargt: &Vec<i8> =
-                                    pop_gts.get(*paridx as usize).expect("couldn't unwrap");
-                                let pos_par: (i32, i32, i32, f64) =
-                                    vec_pars(&childgt, &pargt, &allowed_errors);
-                                let used_markers = pos_par.0 + pos_par.1;
-                                if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
-                                    matches
-                                        .push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
-                                }
-                            } else {
-                                break;
+                let infsnp = inform_snp[*paridx];
+                if infsnp >= DISCOVERY {
+                    if let Some(cage) = ages.get(&child) {
+                        if agecheck(cage, &par.0) {
+                            let pargt: &Vec<i8> =
+                                pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+                            let pos_par: (i32, i32, i32, f64) =
+                                vec_pars(&childgt, &pargt, &allowed_errors);
+                            let used_markers = pos_par.0 + pos_par.1;
+                            if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
+                                matches.push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
                             }
+                        } else {
+                            break;
                         }
                     }
                 }
@@ -193,7 +191,7 @@ fn main() {
     let sample_count = usize::try_from(bcf.header().sample_count()).unwrap();
     let mut anml_lookup: HashMap<i32, usize> = HashMap::with_capacity(sample_count);
     let mut genotypes: Vec<Vec<i8>> = vec![Vec::with_capacity(MAX_MARKERS); sample_count];
-    let mut inform: HashMap<usize, i32> = HashMap::with_capacity(sample_count);
+    let mut inform: Vec<i32> = vec![0; sample_count];
     eprintln!("Indexing animals");
     let vcf_samples: Vec<&str> = bcf
         .header()
@@ -230,7 +228,8 @@ fn main() {
             //let gt: (i8, i32) = conv(&gts.get(sample_index).to_string());
             //let gt: (i8, i32) = gtconv(gts[sample_index]);
             //let gt: (i8, i32) = gtconv(mygt);
-            *inform.entry(sample_index).or_insert(0) += mygt.1;
+            //*inform.entry(sample_index).or_insert(0) += mygt.1;
+            inform[sample_index] += mygt.1;
             genotypes[sample_index].push(mygt.0);
         }
     }
@@ -309,39 +308,38 @@ fn main() {
         for ban in chunk {
             if let Some(bidx) = anml_lookup.get(ban) {
                 let bchild_gt: &Vec<i8> = &genotypes[*bidx as usize];
-                if let Some(inf_markers) = inform.get(bidx) {
-                    let maxerr: i32 = (f64::from(*inf_markers) * MAXERRORS) as i32;
-                    if let Some(fam) = ped.get(ban)
-                        && *inf_markers >= MINMARKERS
-                    {
-                        let sire_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
-                            *ban,
-                            &bchild_gt,
-                            &fam.0,
-                            &anml_lookup,
-                            &genotypes,
-                            &maxerr,
-                            &sorted_sires,
-                            &ages,
-                            &inform,
-                        );
-                        let dam_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
-                            *ban,
-                            &bchild_gt,
-                            &fam.1,
-                            &anml_lookup,
-                            &genotypes,
-                            &maxerr,
-                            &sorted_dams,
-                            &ages,
-                            &inform,
-                        );
-                        if sire_res.len() > 0 {
-                            tx.send((*ban, sire_res)).expect("Thread error");
-                        }
-                        if dam_res.len() > 0 {
-                            txd.send((*ban, dam_res)).expect("Thread error");
-                        }
+                let inf_markers = inform[*bidx];
+                let maxerr: i32 = (f64::from(inf_markers) * MAXERRORS) as i32;
+                if let Some(fam) = ped.get(ban)
+                    && inf_markers >= MINMARKERS
+                {
+                    let sire_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
+                        *ban,
+                        &bchild_gt,
+                        &fam.0,
+                        &anml_lookup,
+                        &genotypes,
+                        &maxerr,
+                        &sorted_sires,
+                        &ages,
+                        &inform,
+                    );
+                    let dam_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
+                        *ban,
+                        &bchild_gt,
+                        &fam.1,
+                        &anml_lookup,
+                        &genotypes,
+                        &maxerr,
+                        &sorted_dams,
+                        &ages,
+                        &inform,
+                    );
+                    if sire_res.len() > 0 {
+                        tx.send((*ban, sire_res)).expect("Thread error");
+                    }
+                    if dam_res.len() > 0 {
+                        txd.send((*ban, dam_res)).expect("Thread error");
                     }
                 }
             }
