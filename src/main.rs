@@ -3,8 +3,6 @@
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
-use rust_htslib::bcf::record::GenotypeAllele::*;
-use rust_htslib::bcf::record::{Genotype, GenotypeAllele};
 use rust_htslib::bcf::{Read, Reader};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -87,12 +85,13 @@ fn findparents(
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
     */
-    let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(1);
+    let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(2);
     let mut global: bool = true;
     if *ped_parent != 0
         && let Some(paridx) = popmap.get(ped_parent)
     {
-        let pargt: &Vec<i8> = pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+        let pargt: &Vec<i8> = //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+            &pop_gts[*paridx];
         let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
         let used_markers = my_pedpar.0 + my_pedpar.1;
         if my_pedpar.1 <= VER_MAX_ERR && used_markers >= MIN_INF_MARKERS {
@@ -119,7 +118,8 @@ fn findparents(
                     if let Some(cage) = ages.get(&child) {
                         if agecheck(cage, &par.0) {
                             let pargt: &Vec<i8> =
-                                pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+                                //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+                                &pop_gts[*paridx];
                             let pos_par: (i32, i32, i32, f64) =
                                 vec_pars(&childgt, &pargt, &allowed_errors);
                             let used_markers = pos_par.0 + pos_par.1;
@@ -135,20 +135,6 @@ fn findparents(
         }
     }
     matches
-}
-
-#[inline]
-fn conv(gt: &str) -> (i8, i32) {
-    match gt {
-        "0/0" => return (-1i8, 1),
-        "0/1" => return (0i8, 1),
-        "1/1" => return (1i8, 1),
-        //"0|0" => return (-1i8, 1),
-        //"0|1" => return (0i8, 1),
-        //"1|0" => return (0i8, 1),
-        //"1|1" => return (1i8, 1),
-        _ => return (0i8, 0),
-    }
 }
 
 #[inline]
@@ -210,9 +196,6 @@ fn main() {
     eprintln!("Starting GT load");
 
     for record in bcf.records().map(|r| r.expect("No record")) {
-        //let b = rust_htslib::bcf::record::Buffer::new();
-        //.enumerate() {
-        //let record = records.expect("No record");
         let gts: Vec<(i8, i32)> = record
             .format(b"GT")
             .integer()
@@ -221,14 +204,7 @@ fn main() {
             .iter()
             .map(|a| gtconv(a))
             .collect();
-        //let gts = record.genotypes_shared_buffer(b).expect("Can't get GTs");
-        //let mygts = rust_htslib::bcf::record::Genotype(gts);
-        //for sample_index in 0..sample_count {
         for (mygt, sample_index) in gts.iter().zip(0..sample_count) {
-            //let gt: (i8, i32) = conv(&gts.get(sample_index).to_string());
-            //let gt: (i8, i32) = gtconv(gts[sample_index]);
-            //let gt: (i8, i32) = gtconv(mygt);
-            //*inform.entry(sample_index).or_insert(0) += mygt.1;
             inform[sample_index] += mygt.1;
             genotypes[sample_index].push(mygt.0);
         }
