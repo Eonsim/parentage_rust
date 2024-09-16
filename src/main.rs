@@ -1,5 +1,6 @@
 #![feature(portable_simd)]
 #![feature(let_chains)]
+#![warn(unused_assignments)]
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
@@ -44,7 +45,6 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
         let pvec: Simd<i8, LANES> = Simd::<i8, LANES>::from_slice(&parent[start..end]);
         suminf += i32::from((cvec.abs() * pvec.abs()).reduce_sum());
         sumdifinf += i32::from((cvec * pvec).reduce_sum());
-        //fails += suminf - sumdifinf; // should it be fails = as the sums are already acumulating
         fails = suminf - sumdifinf;
         end += inc;
         start += inc;
@@ -53,7 +53,6 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
     while start < psize && fails < tmperror {
         suminf += i32::from(child[start].abs() * parent[start].abs());
         sumdifinf += i32::from(child[start] * parent[start]);
-        //fails += suminf - sumdifinf;
         fails = suminf - sumdifinf;
         start += 1;
     }
