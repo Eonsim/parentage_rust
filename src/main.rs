@@ -108,7 +108,7 @@ fn bytes_to_gts(profile_bytes: &[u8]) -> (Vec<i8>, i32) {
             informative += gts3[i].1;
         }
     }
-    (gtp[1907], informative)
+    (gtp[0..1907].to_vec(), informative)
 }
 
 fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
