@@ -60,23 +60,23 @@ fn htsconv(gt: &[i32]) -> (i8, i32) {
     }
 }
 
-fn bytes_to_gts(profile_bytes: Vec<i8>) -> (Vec<i8>, i32) {
+fn bytes_to_gts(profile_bytes: &[u8]) -> (Vec<i8>, i32) {
     let mut snp_start = 0;
     let mut end = snp_start + 4;
     let mut snps = 0;
     let mut gtp: Vec<i8> = Vec::with_capacity(1920);
     let mut informative = 0;
-    while snp_start < 1920 {
-        let res0 = i32::from_le_bytes(profile_bytes[0..4].try_into().expect("nope"));
+    while snps < 1920 {
+        let res0 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
         snp_start += 4;
         end += 4;
-        let res1 = i32::from_le_bytes(profile_bytes[4..8].try_into().expect("nope"));
+        let res1 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
         snp_start += 4;
         end += 4;
-        let res2 = i32::from_le_bytes(profile_bytes[8..12].try_into().expect("nope"));
+        let res2 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
         snp_start += 4;
         end += 4;
-        let res3 = i32::from_le_bytes(profile_bytes[12..16].try_into().expect("nope"));
+        let res3 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
         snp_start += 4;
         end += 4;
         let gts0 = expand_i32_to_u8_pairs_lsb(res0)
@@ -108,7 +108,7 @@ fn bytes_to_gts(profile_bytes: Vec<i8>) -> (Vec<i8>, i32) {
             informative += gts3[i].1;
         }
     }
-    (gtp, informative)
+    (gtp[1907], informative)
 }
 
 fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
@@ -139,7 +139,7 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
 
     for an in 0..meta[0] {
         fbin.read(&mut profile_buffer).expect("Can't write file");
-        let anpro = bytes_to_gts(profile_buffer);
+        let anpro = bytes_to_gts(&profile_buffer);
         mygts[an] = anpro.0;
         inform[an] = anpro.1;
     }
