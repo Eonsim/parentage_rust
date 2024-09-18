@@ -313,7 +313,7 @@ fn main() {
         process::exit(0);
     }
 
-    let threads: &usize = if args.len() == 5 {
+    let threads: &usize = if args.len() >= 5 {
         &args[4].parse::<usize>().unwrap()
     } else {
         &8
