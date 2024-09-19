@@ -49,14 +49,14 @@ fn gtconv(gt: u8) -> (i8, i32) {
 #[inline]
 fn htsconv(gt: &[i32]) -> (i8, i32) {
     match gt {
-        [2, 2] => return (-1i8, 1),
-        [2, 4] => return (0i8, 1),
-        [4, 4] => return (1i8, 1),
+        [2, 2] => (-1i8, 1),
+        [2, 4] => (0i8, 1),
+        [4, 4] => (1i8, 1),
         //"0|0" => return (-1i8, 1),
         //"0|1" => return (0i8, 1),
         //"1|0" => return (0i8, 1),
         //"1|1" => return (1i8, 1),
-        _ => return (0i8, 0),
+        _ => (0i8, 0),
     }
 }
 
@@ -81,19 +81,19 @@ fn bytes_to_gts(profile_bytes: &[u8]) -> (Vec<i8>, i32) {
         end += 4;
         let gts0 = expand_i32_to_u8_pairs_lsb(res0)
             .into_iter()
-            .map(|x| gtconv(x))
+            .map(gtconv)
             .collect::<Vec<(i8, i32)>>();
         let gts1 = expand_i32_to_u8_pairs_lsb(res1)
             .into_iter()
-            .map(|x| gtconv(x))
+            .map(gtconv)
             .collect::<Vec<(i8, i32)>>();
         let gts2 = expand_i32_to_u8_pairs_lsb(res2)
             .into_iter()
-            .map(|x| gtconv(x))
+            .map(gtconv)
             .collect::<Vec<(i8, i32)>>();
         let gts3 = expand_i32_to_u8_pairs_lsb(res3)
             .into_iter()
-            .map(|x| gtconv(x))
+            .map(gtconv)
             .collect::<Vec<(i8, i32)>>();
 
         for i in 0..16 {
@@ -118,7 +118,7 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
 
     /* Load the metadata [Animal Num, Markers, Packed Markers, Blocks] */
     for i in 0..meta.len() {
-        fbin.read(&mut buffer).expect("Can't write file");
+        fbin.read(&mut buffer).expect("Can't read file");
         meta[i] = i32::from_le_bytes(buffer) as usize;
     }
 
@@ -126,8 +126,9 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
 
     let mut anml_lookup: HashMap<i32, usize> = HashMap::with_capacity(meta[0]);
     /* Store the animal ids by index */
+    eprintln!("Indexing animals");
     for i in 0..meta[0] {
-        fbin.read(&mut buffer).expect("Can't write file");
+        fbin.read(&mut buffer).expect("Can't read file");
         anml_idx[i] = i32::from_le_bytes(buffer);
         anml_lookup.insert(anml_idx[i], i);
     }
@@ -143,7 +144,7 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
         mygts[an] = anpro.0;
         inform[an] = anpro.1;
     }
-
+    eprintln!("Read BIN");
     (anml_lookup, mygts, inform)
 }
 
@@ -319,19 +320,20 @@ fn main() {
         &8
     };
 
-    let gsmthd: bool = if args.len() == 6 { true } else { false };
+    //let gsmthd: bool = if args.len() == 6 { true } else { false };
 
     let gtfile: &str = &args[1];
     let anmls_file: &String = &args[2];
     let ped_file: &String = &args[3];
 
-    let myreader: fn(String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) = if gsmthd {
-        println!("GS file enabled");
-        read_gs
-    } else {
-        println!("Reading VCF file");
-        read_vcf
-    };
+    let myreader: fn(String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) =
+        if gtfile.contains(".bin") {
+            println!("GS file enabled");
+            read_gs
+        } else {
+            println!("Reading VCF file");
+            read_vcf
+        };
 
     let (anml_lookup, genotypes, inform) = myreader(gtfile.to_string());
 
