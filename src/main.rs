@@ -252,6 +252,8 @@ fn findparents(
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
     */
+    let mut used_markers = 0;
+    let cage = ages.get(&child).unwrap();
     let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(2);
     let mut global: bool = true;
     if *ped_parent != 0
@@ -276,26 +278,23 @@ fn findparents(
     }
 
     if global {
-        let mut pos_par: (i32, i32, i32, f64) = (0,0,0,0.0);
+        let mut pos_par: (i32, i32, i32, f64) = (0, 0, 0, 0.0);
         for par in pos_parents {
-            if child != par.1
-            {
-                let infsnp = inform_snp[par.2];
-                if infsnp >= DISCOVERY {
-                    if let Some(cage) = ages.get(&child) {
-                        if agecheck(cage, &par.0) {
-                            let pargt: &Vec<i8> =
-                                //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
-                                &pop_gts[par.2];
-                            pos_par =
-                                vec_pars(&childgt, &pargt, &allowed_errors);
-                            let used_markers = pos_par.0 + pos_par.1;
-                            if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
-                                matches.push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
-                            }
-                        } else {
-                            break;
+            if child != par.1 {
+                //let infsnp = inform_snp[par.2];
+                if inform_snp[par.2] >= DISCOVERY {
+                    if agecheck(cage, &par.0) {
+                        //let pargt: &Vec<i8> =
+                        //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
+                        //&pop_gts[par.2];
+                        //pos_par = vec_pars(&childgt, &pargt, &allowed_errors);
+                        pos_par = vec_pars(&childgt, &pop_gts[par.2], &allowed_errors);
+                        used_markers = pos_par.0 + pos_par.1;
+                        if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
+                            matches.push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
                         }
+                    } else {
+                        break;
                     }
                 }
             }
@@ -384,7 +383,7 @@ fn main() {
     let mut sorted_sires: BTreeSet<(i16, i32, usize)> = BTreeSet::new();
     for s in sires_list {
         if let Some(sireinfo) = ped.get(&s) {
-            if let Some(sire_idx) = anml_lookup.get(&s){
+            if let Some(sire_idx) = anml_lookup.get(&s) {
                 sorted_sires.insert((sireinfo.3, s, *sire_idx));
             }
         }
@@ -393,7 +392,7 @@ fn main() {
     let mut sorted_dams = BTreeSet::new();
     for d in dams_list {
         if let Some(daminfo) = ped.get(&d) {
-            if let Some(dam_idx) = anml_lookup.get(&d){
+            if let Some(dam_idx) = anml_lookup.get(&d) {
                 sorted_dams.insert((daminfo.3, d, *dam_idx));
             }
         }
