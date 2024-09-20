@@ -192,7 +192,7 @@ fn read_vcf(vcffile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
     (anml_lookup, genotypes, inform)
 }
 
-#[inline(always)]
+//#[inline(always)]
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
     let mut end: usize = LANES;
@@ -245,15 +245,15 @@ fn findparents(
     popmap: &HashMap<i32, usize>,
     pop_gts: &Vec<Vec<i8>>,
     allowed_errors: &i32,
-    pos_parents: &BTreeSet<(i16, i32, usize)>,
+    pos_parents: &Vec<(i16, i32, usize)>,
     ages: &HashMap<i32, i16>,
     inform_snp: &Vec<i32>,
 ) -> Vec<(i32, i32, i32, i32, f64)> {
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
     */
-    let mut used_markers = 0;
-    let cage = ages.get(&child).unwrap();
+    let mut used_markers: i32 = 0;
+    let cage: &i16 = ages.get(&child).unwrap();
     let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(2);
     let mut global: bool = true;
     if *ped_parent != 0
@@ -388,6 +388,7 @@ fn main() {
             }
         }
     }
+    let sorted_sires: Vec<(i16,i32,usize)> = sorted_sires.into_iter().collect();
 
     let mut sorted_dams = BTreeSet::new();
     for d in dams_list {
@@ -397,6 +398,7 @@ fn main() {
             }
         }
     }
+    let sorted_dams: Vec<(i16,i32,usize)> = sorted_dams.into_iter().collect();
 
     let (tx, rx) = mpsc::channel();
     let (txd, rxd) = mpsc::channel();
