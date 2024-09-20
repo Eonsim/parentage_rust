@@ -192,6 +192,7 @@ fn read_vcf(vcffile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
     (anml_lookup, genotypes, inform)
 }
 
+#[inline(always)]
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
     let mut end: usize = LANES;
@@ -244,7 +245,7 @@ fn findparents(
     popmap: &HashMap<i32, usize>,
     pop_gts: &Vec<Vec<i8>>,
     allowed_errors: &i32,
-    pos_parents: &BTreeSet<(i16, i32)>,
+    pos_parents: &BTreeSet<(i16, i32, usize)>,
     ages: &HashMap<i32, i16>,
     inform_snp: &Vec<i32>,
 ) -> Vec<(i32, i32, i32, i32, f64)> {
@@ -275,18 +276,18 @@ fn findparents(
     }
 
     if global {
+        let mut pos_par: (i32, i32, i32, f64) = (0,0,0,0.0);
         for par in pos_parents {
-            if let Some(paridx) = popmap.get(&par.1)
-                && child != par.1
+            if child != par.1
             {
-                let infsnp = inform_snp[*paridx];
+                let infsnp = inform_snp[par.2];
                 if infsnp >= DISCOVERY {
                     if let Some(cage) = ages.get(&child) {
                         if agecheck(cage, &par.0) {
                             let pargt: &Vec<i8> =
                                 //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
-                                &pop_gts[*paridx];
-                            let pos_par: (i32, i32, i32, f64) =
+                                &pop_gts[par.2];
+                            pos_par =
                                 vec_pars(&childgt, &pargt, &allowed_errors);
                             let used_markers = pos_par.0 + pos_par.1;
                             if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
@@ -380,17 +381,21 @@ fn main() {
         }
     }
 
-    let mut sorted_sires = BTreeSet::new();
+    let mut sorted_sires: BTreeSet<(i16, i32, usize)> = BTreeSet::new();
     for s in sires_list {
         if let Some(sireinfo) = ped.get(&s) {
-            sorted_sires.insert((sireinfo.3, s));
+            if let Some(sire_idx) = anml_lookup.get(&s){
+                sorted_sires.insert((sireinfo.3, s, *sire_idx));
+            }
         }
     }
 
     let mut sorted_dams = BTreeSet::new();
     for d in dams_list {
         if let Some(daminfo) = ped.get(&d) {
-            sorted_dams.insert((daminfo.3, d));
+            if let Some(dam_idx) = anml_lookup.get(&d){
+                sorted_dams.insert((daminfo.3, d, *dam_idx));
+            }
         }
     }
 
