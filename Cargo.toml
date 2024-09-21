@@ -9,5 +9,5 @@ rayon = "1.10.0"
 rust-htslib = "0.47.0"
 
 [profile.release]
-#lto = "fat"
+lto = "fat"
 #codegen-units = 1
