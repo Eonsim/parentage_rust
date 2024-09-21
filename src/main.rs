@@ -224,7 +224,7 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
     }
 
     fails = fails / 2;
-    //let uninf = psi - suminf; // as i32;
+    let uninf = psi - suminf; // as i32;
     let goodm = psi - (uninf + fails); // as i32;
     (
         goodm,
@@ -250,11 +250,12 @@ fn findparents(
     pos_parents: &Vec<(i16, i32, usize)>,
     ages: &HashMap<i32, i16>,
     inform_snp: &Vec<i32>,
-) -> Vec<(i32, i32, i32, i32, f64)> {
+) -> (Vec<(i32, i32, i32, i32, f64)>,(i32, i32, i32, i32, f64)) {
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
     */
     let mut used_markers: i32 = 0;
+    let mut ped_match: (i32, i32, i32, i32, f64) = (0,0,0,0,0.0)
     let cage: &i16 = ages.get(&child).unwrap();
     let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(2);
     let mut global: bool = true;
@@ -264,18 +265,18 @@ fn findparents(
         let pargt: &Vec<i8> = //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
             &pop_gts[*paridx];
         let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
+        ped_match = (
+            *ped_parent,
+            my_pedpar.0,
+            my_pedpar.1,
+            my_pedpar.2,
+            my_pedpar.3,
+        );
         let used_markers = my_pedpar.0 + my_pedpar.1;
         if my_pedpar.1 <= VER_MAX_ERR && used_markers >= MIN_INF_MARKERS {
-            //MINMATCH {
-            matches.push((
-                *ped_parent,
-                my_pedpar.0,
-                my_pedpar.1,
-                my_pedpar.2,
-                my_pedpar.3,
-            ));
+            matches.push(ped_match);
             global = false;
-            return matches;
+            return (matches,ped_match);
         }
     }
 
@@ -283,13 +284,8 @@ fn findparents(
         let mut pos_par: (i32, i32, i32, f64) = (0, 0, 0, 0.0);
         for par in pos_parents {
             if child != par.1 {
-                //let infsnp = inform_snp[par.2];
                 if inform_snp[par.2] >= DISCOVERY {
                     if agecheck(cage, &par.0) {
-                        //let pargt: &Vec<i8> =
-                        //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
-                        //&pop_gts[par.2];
-                        //pos_par = vec_pars(&childgt, &pargt, &allowed_errors);
                         pos_par = vec_pars(&childgt, &pop_gts[par.2], &allowed_errors);
                         used_markers = pos_par.0 + pos_par.1;
                         if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
@@ -302,7 +298,7 @@ fn findparents(
             }
         }
     }
-    matches
+    (matches,ped_match)
 }
 
 fn main() {
@@ -310,12 +306,17 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 || args.contains(&String::from("-h")) {
         eprintln!(
-            "Error, requires 3 files:\n myprog my.vcf.gz my.ids.txt my.ped threadsN GS\nExiting."
+            "Error, requires 3 files:\n myprog my.vcf.gz my.ids.txt my.ped threadsN <--debug>\nExiting."
         );
         use std::process;
         process::exit(0);
     }
 
+    let debug_mode = if args.contains(&"--debug".to_string()){
+        true
+    } else {
+        false
+    };
     let threads: &usize = if args.len() >= 5 {
         &args[4].parse::<usize>().unwrap()
     } else {
@@ -413,8 +414,8 @@ fn main() {
     anmls_list.shuffle(&mut rng);
 
     anmls_list.par_chunks(chunk_size).for_each(|chunk| {
-        let tx: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = tx.clone();
-        let txd: mpsc::Sender<(i32, Vec<(i32, i32, i32, i32, f64)>)> = txd.clone();
+        let tx: mpsc::Sender<(i32, (Vec<(i32, i32, i32, i32, f64)>,(i32, i32, i32, i32, f64)))> = tx.clone();
+        let txd: mpsc::Sender<(i32, (Vec<(i32, i32, i32, i32, f64)>,(i32, i32, i32, i32, f64)))> = txd.clone();
         for ban in chunk {
             if let Some(bidx) = anml_lookup.get(ban) {
                 let bchild_gt: &Vec<i8> = &genotypes[*bidx as usize];
@@ -423,7 +424,7 @@ fn main() {
                 if let Some(fam) = ped.get(ban)
                     && inf_markers >= MINMARKERS
                 {
-                    let sire_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
+                    let sire_res: (Vec<(i32, i32, i32, i32, f64)>,(i32, i32, i32, i32, f64)) = findparents(
                         *ban,
                         &bchild_gt,
                         &fam.0,
@@ -434,7 +435,7 @@ fn main() {
                         &ages,
                         &inform,
                     );
-                    let dam_res: Vec<(i32, i32, i32, i32, f64)> = findparents(
+                    let dam_res: (Vec<(i32, i32, i32, i32, f64)>,(i32, i32, i32, i32, f64)) = findparents(
                         *ban,
                         &bchild_gt,
                         &fam.1,
@@ -445,12 +446,12 @@ fn main() {
                         &ages,
                         &inform,
                     );
-                    if sire_res.len() > 0 {
+                    //if sire_res.len() > 0 {
                         tx.send((*ban, sire_res)).expect("Thread error");
-                    }
-                    if dam_res.len() > 0 {
+                        //}
+                    //if dam_res.len() > 0 {
                         txd.send((*ban, dam_res)).expect("Thread error");
-                    }
+                        //}
                 }
             }
         }
@@ -469,20 +470,29 @@ fn main() {
 
     let fout = File::create("parentage_rust.csv").expect("Couldn't create file");
     let mut owrite = BufWriter::new(fout);
-    let header = "Animal_Key,Sire_Verification_Code,Dam_Verification_Code,Number_Sire_Matches,Number_Dam_Matches,Sire_Match_1,Sire_Match_1_Number_Informative_SNP,Sire_Match_1_Pass_Rate,Dam_Match_1,Dam_Match_1_Number_Informative_SNP,Dam_Match_1_Pass_Rate,Sire_Match_2,Sire_Match_2_Number_Informative_SNP,Sire_Match_2_Pass_Rate,Dam_Match_2,Dam_Match_2_Number_Informative_SNP,Dam_Match_2_Pass_Rate\n";
-    write!(owrite, "{}", header).expect("Can't write header");
+    let header = "Animal_Key,Sire_Verification_Code,Dam_Verification_Code,Number_Sire_Matches,Number_Dam_Matches,Sire_Match_1,Sire_Match_1_Number_Informative_SNP,Sire_Match_1_Pass_Rate,Dam_Match_1,Dam_Match_1_Number_Informative_SNP,Dam_Match_1_Pass_Rate,Sire_Match_2,Sire_Match_2_Number_Informative_SNP,Sire_Match_2_Pass_Rate,Dam_Match_2,Dam_Match_2_Number_Informative_SNP,Dam_Match_2_Pass_Rate";
+    let debug_txt = if debug_mode {
+        ",Ped_Sire,Ped_Dam"
+        } else{
+            ""
+        };
+    write!(owrite, "{}{}\n", header,debug_txt).expect("Can't write header");
 
     for an in anmls_list {
         if let Some(fam) = ped.get(&an) {
             let mut my_sires: Vec<(i32, i32, i32, i32, f64)> = vec![];
             let mut my_dams: Vec<(i32, i32, i32, i32, f64)> = vec![];
+            let mut ped_sire_res: (i32, i32, i32, i32, f64) = (0,0,0,0,0.0);
+            let mut ped_dam_res: (i32, i32, i32, i32, f64) = (0,0,0,0,0.0);
             if let Some(sires) = results.get(&an) {
-                my_sires = sires.clone();
+                my_sires = sires.0.clone();
                 my_sires.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+                ped_sire_res = sires.1;
             }
             if let Some(dams) = resultd.get(&an) {
-                my_dams = dams.clone();
+                my_dams = dams.0.clone();
                 my_dams.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+                ped_dam_res = dams.1;
             }
             let ped_sire = fam.0;
             let ped_dam = fam.1;
@@ -512,6 +522,11 @@ fn main() {
                 } else {
                     write!(owrite, ",0,0,0").expect("Can't write to file");
                 }
+            }
+            if debug_mode {
+                let dsire = format!("{:?}",ped_sire_res).replace(",","|");
+                let ddam = format!("{:?}",ped_dam_res).replace(",","|");
+                write!(owrite, "{},{}",dsire,ddam).expect("Can't write to file");
             }
             write!(owrite, "\n").expect("Can't write to file");
         }
