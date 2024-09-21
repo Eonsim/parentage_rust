@@ -118,7 +118,7 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
 
     /* Load the metadata [Animal Num, Markers, Packed Markers, Blocks] */
     for i in 0..meta.len() {
-        fbin.read(&mut buffer).expect("Can't read file");
+        fbin.read_exact(&mut buffer).expect("Can't read file");
         meta[i] = i32::from_le_bytes(buffer) as usize;
     }
 
@@ -128,7 +128,7 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
     /* Store the animal ids by index */
     eprintln!("Indexing animals");
     for i in 0..meta[0] {
-        fbin.read(&mut buffer).expect("Can't read file");
+        fbin.read_exact(&mut buffer).expect("Can't read file");
         anml_idx[i] = i32::from_le_bytes(buffer);
         anml_lookup.insert(anml_idx[i], i);
     }
@@ -139,10 +139,11 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
     let mut profile_buffer = [0u8; 480];
 
     for an in 0..meta[0] {
-        fbin.read(&mut profile_buffer).expect("Can't write file");
-        let anpro = bytes_to_gts(&profile_buffer);
-        mygts[an] = anpro.0;
-        inform[an] = anpro.1;
+        fbin.read_exact(&mut profile_buffer).expect("Can't write file");
+        (mygts[an], inform[an]) = bytes_to_gts(&profile_buffer);
+        //let anpro = bytes_to_gts(&profile_buffer);
+        //mygts[an] = anpro.0;
+        //inform[an] = anpro.1;
     }
     eprintln!("Read BIN");
     (anml_lookup, mygts, inform)
@@ -192,7 +193,7 @@ fn read_vcf(vcffile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
     (anml_lookup, genotypes, inform)
 }
 
-//#[inline(always)]
+#[inline(always)]
 fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
     let mut start: usize = 0;
     let mut end: usize = LANES;
