@@ -139,7 +139,8 @@ fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
     let mut profile_buffer = [0u8; 480];
 
     for an in 0..meta[0] {
-        fbin.read_exact(&mut profile_buffer).expect("Can't write file");
+        fbin.read_exact(&mut profile_buffer)
+            .expect("Can't write file");
         (mygts[an], inform[an]) = bytes_to_gts(&profile_buffer);
         //let anpro = bytes_to_gts(&profile_buffer);
         //mygts[an] = anpro.0;
@@ -223,12 +224,12 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
     }
 
     fails = fails / 2;
-    let uninf = psi - suminf; // as i32;
+    //let uninf = psi - suminf; // as i32;
     let goodm = psi - (uninf + fails); // as i32;
     (
         goodm,
         fails,
-        uninf,
+        suminf,
         f64::from(goodm) / f64::from(goodm + fails),
     )
 }
@@ -389,7 +390,7 @@ fn main() {
             }
         }
     }
-    let sorted_sires: Vec<(i16,i32,usize)> = sorted_sires.into_iter().collect();
+    let sorted_sires: Vec<(i16, i32, usize)> = sorted_sires.into_iter().collect();
 
     let mut sorted_dams = BTreeSet::new();
     for d in dams_list {
@@ -399,7 +400,7 @@ fn main() {
             }
         }
     }
-    let sorted_dams: Vec<(i16,i32,usize)> = sorted_dams.into_iter().collect();
+    let sorted_dams: Vec<(i16, i32, usize)> = sorted_dams.into_iter().collect();
 
     let (tx, rx) = mpsc::channel();
     let (txd, rxd) = mpsc::channel();
