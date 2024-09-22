@@ -342,6 +342,7 @@ fn findparents(
 }
 
 fn main() {
+    eprintln!("Rust Parent Match\nChad S. Harland\n Copyright (c) 2024");
     let startt: Instant = Instant::now();
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 || args.contains(&String::from("-h")) {
@@ -373,6 +374,7 @@ fn main() {
     let mut min_par_age = MIN_PAR_AGE;
 
     if args.contains(&"--config".to_string()) {
+        eprintln!("Reading json configuration");
         use serde_json::Value;
         let json_idx = &args.iter().position(|x| x == "--config").unwrap() + 1;
         let mut jfile = File::open(&args[json_idx]).expect("can't Read config file");
@@ -403,35 +405,9 @@ fn main() {
             .as_i64()
             .expect("Invalid JSON values") as i16;
     }
-
-    /*
-    {
-        "minimum_verification_snp": 90,
-        "minimum_informative_snp": 20,
-        "minimum_discovery_snp": 300,
-        "verification_maximum_snp_failures": 3,
-        "discovery_accuracy": 0.990,
-        "trio_accuracy": 0.985,
-        "verification_possible_accuracy": 0.970,
-        "trio_possible_accuracy": 0.960,
-        "parent_child_age_difference": 2
-    }
-    const MINMARKERS: i32 = 90;
-    const MAXERRORS: f64 = 0.03;
-    //const MINMATCH: f64 = 0.99;
-    const POSMATCH: f64 = 0.97;
-    const DISCOVERY: i32 = 300;
-    const VER_MAX_ERR: i32 = 3;
-    const MIN_INF_MARKERS: i32 = 20;
-    const MAX_MARKERS: usize = 1907;
-    const TRIO_ERROR: f64 = 0.04;
-    */
-
-    //let gsmthd: bool = if args.len() == 6 { true } else { false };
-
     let gtfile: &str = &args[1];
-    let anmls_file: &String = &args[3];
     let ped_file: &String = &args[2];
+    let anmls_file: &String = &args[3];
 
     let myreader: fn(String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) =
         if gtfile.contains(".bin") {
@@ -468,12 +444,12 @@ fn main() {
     for line in preader.lines() {
         let tmp = line.unwrap();
         let dat: Vec<&str> = tmp.split_whitespace().collect();
-        let child: i32 = dat[1].parse::<i32>().unwrap();
-        let sire: i32 = dat[2].parse::<i32>().unwrap();
-        let dam: i32 = dat[3].parse::<i32>().unwrap();
-        let sex: i8 = dat[4].parse::<i8>().unwrap();
-        let year: i16 = dat[5].parse::<i16>().unwrap();
-        ped.insert(dat[1].parse::<i32>().unwrap(), (sire, dam, sex, year));
+        let child: i32 = dat[1].parse::<i32>().expect("Couldn't parse Ped");
+        let sire: i32 = dat[2].parse::<i32>().expect("Couldn't parse Ped");
+        let dam: i32 = dat[3].parse::<i32>().expect("Couldn't parse Ped");
+        let sex: i8 = dat[4].parse::<i8>().expect("Couldn't parse Ped");
+        let year: i16 = dat[5].parse::<i16>().expect("Couldn't parse Ped");
+        ped.insert(child, (sire, dam, sex, year));
         if anml_lookup.contains_key(&sire) {
             sires_list.insert(sire);
         }
