@@ -23,7 +23,7 @@ const DISCOVERY: i32 = 300;
 const VER_MAX_ERR: i32 = 3;
 const MIN_INF_MARKERS: i32 = 20;
 const MAX_MARKERS: usize = 1907;
-const TRIO_ERROR : f64 = 0.04;
+const TRIO_ERROR: f64 = 0.04;
 
 fn expand_i32_to_u8_pairs_lsb(input: i32) -> [u8; 16] {
     let mut result = [0u8; 16];
@@ -240,34 +240,34 @@ fn agecheck(kid: &i16, par: &i16) -> bool {
     *kid - *par >= 2i16
 }
 
-fn trio_test(sirep: Vec<i8>, damp: Vec<i8>, childp: Vec<i8>, maxfails: i32) -> (bool, i32){
+fn trio_test(sirep: &[i8], damp: &[i8], childp: &[i8], maxfails: &i32) -> (bool, i32) {
     let mut fails = 0;
     let mut valid_trio = true;
-    for i in 0..childp.len(){
+    for i in 0..childp.len() {
         let sgt = sirep[i];
         let dgt = damp[i];
         let cgt = childp[i];
         let dif = sgt - dgt;
         let adif = dif.abs();
-        if dif == 0{
+        if dif == 0 {
             if cgt != sgt {
                 fails += 1;
             }
         } else {
             if adif == 2 {
-                if cgt != 0{
+                if cgt != 0 {
                     fails += 1;
                 }
             } else {
                 if adif == 1 {
-                    if cgt != sgt && cgt != dgt{
-                        fails +=1
+                    if cgt != sgt && cgt != dgt {
+                        fails += 1
                     }
                 }
             }
         }
 
-        if fails > maxfails{
+        if fails > *maxfails {
             valid_trio = false;
             break;
         }
@@ -526,7 +526,7 @@ fn main() {
             let mut ped_dam_res: (i32, i32, i32, i32, f64) = (0, 0, 0, 0, 0.0);
             let mut tswap = 0;
             let mut trio_check = 0;
-            let mut trio: (i32,i32,f64) = (0,0,0.0);
+            let mut trio: (i32, i32, f64) = (0, 0, 0.0);
             let childidx = anml_lookup.get(&an).unwrap();
             let child_inform = inform[*childidx];
             if let Some(sires) = results.get(&an) {
@@ -540,30 +540,41 @@ fn main() {
                 ped_dam_res = dams.1;
             }
 
-            if my_sires.len() > 0 && my_dams.len() > 0{
-                let trios: Vec<(i32, i32, i32)> = vec![];
-                let childp: Vec<i8> = genotypes[*childidx];
+            if my_sires.len() > 0 && my_dams.len() > 0 {
+                //let trios: Vec<(i32, i32, i32)> = vec![];
+                let childp: &Vec<i8> = &genotypes[*childidx];
                 let child_error = (f64::from(child_inform) * TRIO_ERROR) as i32;
-                for s in my_sires{
-                    let sirep: Vec<i8> = genotypes[*anml_lookup.get(&s.0).unwrap()];
-                    for d in my_dams{
-                        let trio_res = trio_test(sirep, genotypes[*anml_lookup.get(&d.0).unwrap()], childp, child_error);
+                for s in &my_sires {
+                    let sirep: &Vec<i8> = &genotypes[*anml_lookup.get(&s.0).unwrap()];
+                    for d in &my_dams {
+                        let trio_res = trio_test(
+                            sirep,
+                            &genotypes[*anml_lookup.get(&d.0).unwrap()],
+                            childp,
+                            &child_error,
+                        );
                         if trio_res.0 {
-                            let pass_rate = f64::from(child_inform - trio_res.1) / f64::from(child_inform);
-                            trio = (s.0,d.0,pass_rate);
+                            let pass_rate =
+                                f64::from(child_inform - trio_res.1) / f64::from(child_inform);
+                            trio = (s.0, d.0, pass_rate);
                             trio_check = 1;
                         } else {
-                            let trio_res = trio_test(sirep, childp,genotypes[*anml_lookup.get(&d.0).unwrap()], child_error);
-                            if trio_res.0{
+                            let trio_res = trio_test(
+                                sirep,
+                                childp,
+                                &genotypes[*anml_lookup.get(&d.0).unwrap()],
+                                &child_error,
+                            );
+                            if trio_res.0 {
                                 tswap = 1;
-                                let pass_rate = f64::from(child_inform - trio_res.1) / f64::from(child_inform);
-                                trio = (s.0,d.0,pass_rate);
+                                let pass_rate =
+                                    f64::from(child_inform - trio_res.1) / f64::from(child_inform);
+                                trio = (s.0, d.0, pass_rate);
                                 trio_check = 1;
                             }
                         }
                     }
                 }
-
             }
 
             let ped_sire: i32 = fam.0;
@@ -576,8 +587,8 @@ fn main() {
                 an,
                 savail as i32,
                 davail as i32,
-                my_sires.len(),
-                my_dams.len()
+                &my_sires.len(),
+                &my_dams.len()
             )
             .expect("Can't write to file");
 
@@ -595,8 +606,13 @@ fn main() {
                     write!(owrite, ",0,0,0").expect("Can't write to file");
                 }
             }
-            if trio_check == 1{
-                write!(owrite, ",{},{},{},{}",trio_check,tswap,child_inform,trio.2).expect("Can't write to file");
+            if trio_check == 1 {
+                write!(
+                    owrite,
+                    ",{},{},{},{}",
+                    trio_check, tswap, child_inform, trio.2
+                )
+                .expect("Can't write to file");
             } else {
                 write!(owrite, ",0,0,0,0").expect("Can't write to file");
             }
@@ -608,9 +624,8 @@ fn main() {
                 let ddam: String = format!("{:?}", ped_dam_res)
                     .replace(",", "|")
                     .replace(" ", "");
-                let dtrio: String = format!("{:?}",trio).replace(",", "|")
-                .replace(" ", "");
-                write!(owrite, ",{},{},{}", dsire, ddam,dtrio).expect("Can't write to file");
+                let dtrio: String = format!("{:?}", trio).replace(",", "|").replace(" ", "");
+                write!(owrite, ",{},{},{}", dsire, ddam, dtrio).expect("Can't write to file");
             }
             write!(owrite, "\n").expect("Can't write to file");
         }
