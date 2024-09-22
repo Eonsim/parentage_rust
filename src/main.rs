@@ -16,13 +16,19 @@ use std::sync::mpsc;
 use std::time::Instant;
 const LANES: usize = 64;
 const MINMARKERS: i32 = 90;
-const MAXERRORS: f64 = 0.04;
-//const MINMATCH: f64 = 0.99;
-const POSMATCH: f64 = 0.97;
+//const MAXERRORS: f64 = 0.03;
+const DISCOVERY_ACC: f64 = 0.99;
+//const POSMATCH: f64 = 0.97;
 const DISCOVERY: i32 = 300;
 const VER_MAX_ERR: i32 = 3;
 const MIN_INF_MARKERS: i32 = 20;
 const MAX_MARKERS: usize = 1907;
+const TRIO_ERROR: f64 = 0.04;
+const MIN_PAR_AGE: i16 = 2;
+const RR: i8 = -1;
+const RA: i8 = 0;
+const AA: i8 = 1;
+const MS: i8 = 0;
 
 fn expand_i32_to_u8_pairs_lsb(input: i32) -> [u8; 16] {
     let mut result = [0u8; 16];
@@ -39,24 +45,24 @@ fn expand_i32_to_u8_pairs_lsb(input: i32) -> [u8; 16] {
 #[inline]
 fn gtconv(gt: u8) -> (i8, i32) {
     match gt {
-        0 => (-1, 1),
-        1 => (0, 1),
-        2 => (1, 1),
-        _ => (0, 0),
+        0 => (RR, 1),
+        1 => (RA, 1),
+        2 => (AA, 1),
+        _ => (MS, 0),
     }
 }
 
 #[inline]
 fn htsconv(gt: &[i32]) -> (i8, i32) {
     match gt {
-        [2, 2] => (-1i8, 1),
-        [2, 4] => (0i8, 1),
-        [4, 4] => (1i8, 1),
+        [2, 2] => (RR, 1),
+        [2, 4] => (RA, 1),
+        [4, 4] => (AA, 1),
         //"0|0" => return (-1i8, 1),
         //"0|1" => return (0i8, 1),
         //"1|0" => return (0i8, 1),
         //"1|1" => return (1i8, 1),
-        _ => (0i8, 0),
+        _ => (MS, 0),
     }
 }
 
@@ -235,8 +241,38 @@ fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) 
 }
 
 #[inline(always)]
-fn agecheck(kid: &i16, par: &i16) -> bool {
-    *kid - *par >= 2i16
+fn agecheck(kid: &i16, par: &i16, min_age: &i16) -> bool {
+    *kid - *par >= *min_age
+}
+
+fn trio_test_log(sirep: &[i8], damp: &[i8], childp: &[i8], maxfails: &i32) -> (bool, i32) {
+    let mut fails = 0;
+    let mut pass = 0;
+    let mut valid_trio = true;
+    for i in 0..childp.len() {
+        let sgt = sirep[i];
+        let dgt = damp[i];
+        let cgt = childp[i];
+
+        if cgt == RA && ((sgt == RR && dgt == AA) || (sgt == AA && dgt == RR)) {
+            pass += 1;
+        } else {
+            if cgt == RA && ((sgt == RR && dgt == RR) || (sgt == AA && dgt == AA)) {
+                fails += 1;
+            } else {
+                if (cgt == RR && sgt == RR && dgt == RR) || (cgt == AA && sgt == AA && dgt == AA) {
+                    pass += 1
+                }
+            }
+        }
+
+        if fails > *maxfails {
+            valid_trio = false;
+            break;
+        }
+    }
+
+    (valid_trio, fails)
 }
 
 /* Need, child, childgt, popmap, popgt, errors, ages,parent list*/
@@ -250,6 +286,11 @@ fn findparents(
     pos_parents: &Vec<(i16, i32, usize)>,
     ages: &HashMap<i32, i16>,
     inform_snp: &Vec<i32>,
+    min_informative: &i32,
+    discover_snp: &i32,
+    max_veri_error: &i32,
+    discovery_acc: &f64,
+    min_age: &i16,
 ) -> (Vec<(i32, i32, i32, i32, f64)>, (i32, i32, i32, i32, f64)) {
     /* For possible parents First check pedpar if it matches return
         Otherwise if age is correct and parent has enough markers then parent match
@@ -273,7 +314,7 @@ fn findparents(
             my_pedpar.3,
         );
         let used_markers = my_pedpar.0 + my_pedpar.1;
-        if my_pedpar.1 <= VER_MAX_ERR && used_markers >= MIN_INF_MARKERS {
+        if my_pedpar.1 <= *max_veri_error && used_markers >= *min_informative {
             matches.push(ped_match);
             global = false;
             return (matches, ped_match);
@@ -283,11 +324,11 @@ fn findparents(
     if global {
         for par in pos_parents {
             if child != par.1 {
-                if inform_snp[par.2] >= DISCOVERY {
-                    if agecheck(cage, &par.0) {
+                if inform_snp[par.2] >= *discover_snp {
+                    if agecheck(cage, &par.0, &min_age) {
                         let pos_par = vec_pars(&childgt, &pop_gts[par.2], &allowed_errors);
                         used_markers = pos_par.0 + pos_par.1;
-                        if pos_par.3 >= POSMATCH && used_markers >= MIN_INF_MARKERS {
+                        if pos_par.3 >= *discovery_acc && used_markers >= *min_informative {
                             matches.push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
                         }
                     } else {
@@ -301,11 +342,12 @@ fn findparents(
 }
 
 fn main() {
+    eprintln!("Rust Parent Match\nChad S. Harland\n Copyright (c) 2024");
     let startt: Instant = Instant::now();
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 || args.contains(&String::from("-h")) {
         eprintln!(
-            "Error, requires 3 files:\n myprog my.vcf.gz my.ids.txt my.ped threadsN <--debug>\nExiting."
+            "Error, requires 3 files:\n myprog my.vcf.gz my.ped my.ids.txt threadsN <--config config.json> <--debug>\nExiting."
         );
         use std::process;
         process::exit(0);
@@ -322,11 +364,50 @@ fn main() {
         &8
     };
 
-    //let gsmthd: bool = if args.len() == 6 { true } else { false };
+    let mut min_markers = MINMARKERS;
+    let mut min_informative = MIN_INF_MARKERS;
+    let mut max_veri_errors = VER_MAX_ERR;
+    let mut discovery_acc = DISCOVERY_ACC;
+    //let mut pos_match = POSMATCH;
+    let mut min_discovery = DISCOVERY;
+    let mut trio_acc = TRIO_ERROR;
+    let mut min_par_age = MIN_PAR_AGE;
 
+    if args.contains(&"--config".to_string()) {
+        eprintln!("Reading json configuration");
+        use serde_json::Value;
+        let json_idx = &args.iter().position(|x| x == "--config").unwrap() + 1;
+        let mut jfile = File::open(&args[json_idx]).expect("can't Read config file");
+        let mut config_json = String::new();
+        jfile
+            .read_to_string(&mut config_json)
+            .expect("can't Read config file");
+        let config: Value = serde_json::from_str(&config_json).expect("can't convert to JSON");
+        min_markers = config["minimum_verification_snp"]
+            .as_i64()
+            .expect("Invalid JSON values") as i32;
+        min_informative = config["minimum_informative_snp"]
+            .as_i64()
+            .expect("Invalid JSON values") as i32;
+        min_discovery = config["minimum_discovery_snp"]
+            .as_i64()
+            .expect("Invalid JSON values") as i32;
+        max_veri_errors = config["verification_maximum_snp_failures"]
+            .as_i64()
+            .expect("Invalid JSON values") as i32;
+        discovery_acc = config["discovery_accuracy"]
+            .as_f64()
+            .expect("Invalid JSON values");
+        trio_acc = config["trio_possible_accuracy"]
+            .as_f64()
+            .expect("Invalid JSON values");
+        min_par_age = config["parent_child_age_difference"]
+            .as_i64()
+            .expect("Invalid JSON values") as i16;
+    }
     let gtfile: &str = &args[1];
-    let anmls_file: &String = &args[2];
-    let ped_file: &String = &args[3];
+    let ped_file: &String = &args[2];
+    let anmls_file: &String = &args[3];
 
     let myreader: fn(String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) =
         if gtfile.contains(".bin") {
@@ -345,7 +426,10 @@ fn main() {
     eprintln!("Loading target anmls after {:?}", startt.elapsed());
 
     for line in areader.lines() {
-        anmls_list.push(line.unwrap().parse::<i32>().unwrap());
+        let anml = line.unwrap().parse::<i32>().unwrap();
+        if anml_lookup.contains_key(&anml) {
+            anmls_list.push(anml);
+        }
     }
 
     let pfile = File::open(&ped_file).expect("Failed to read ped file");
@@ -360,12 +444,12 @@ fn main() {
     for line in preader.lines() {
         let tmp = line.unwrap();
         let dat: Vec<&str> = tmp.split_whitespace().collect();
-        let child: i32 = dat[1].parse::<i32>().unwrap();
-        let sire: i32 = dat[2].parse::<i32>().unwrap();
-        let dam: i32 = dat[3].parse::<i32>().unwrap();
-        let sex: i8 = dat[4].parse::<i8>().unwrap();
-        let year: i16 = dat[5].parse::<i16>().unwrap();
-        ped.insert(dat[1].parse::<i32>().unwrap(), (sire, dam, sex, year));
+        let child: i32 = dat[1].parse::<i32>().expect("Couldn't parse Ped");
+        let sire: i32 = dat[2].parse::<i32>().expect("Couldn't parse Ped");
+        let dam: i32 = dat[3].parse::<i32>().expect("Couldn't parse Ped");
+        let sex: i8 = dat[4].parse::<i8>().expect("Couldn't parse Ped");
+        let year: i16 = dat[5].parse::<i16>().expect("Couldn't parse Ped");
+        ped.insert(child, (sire, dam, sex, year));
         if anml_lookup.contains_key(&sire) {
             sires_list.insert(sire);
         }
@@ -425,9 +509,9 @@ fn main() {
             if let Some(bidx) = anml_lookup.get(ban) {
                 let bchild_gt: &Vec<i8> = &genotypes[*bidx as usize];
                 let inf_markers = inform[*bidx];
-                let maxerr: i32 = (f64::from(inf_markers) * MAXERRORS) as i32;
+                let maxerr: i32 = (f64::from(inf_markers) * (1.0 - discovery_acc)) as i32;
                 if let Some(fam) = ped.get(ban)
-                    && inf_markers >= MINMARKERS
+                    && inf_markers >= min_markers
                 {
                     let sire_res: (Vec<(i32, i32, i32, i32, f64)>, (i32, i32, i32, i32, f64)) =
                         findparents(
@@ -440,6 +524,11 @@ fn main() {
                             &sorted_sires,
                             &ages,
                             &inform,
+                            &min_informative,
+                            &min_discovery,
+                            &max_veri_errors,
+                            &discovery_acc,
+                            &min_par_age,
                         );
                     let dam_res: (Vec<(i32, i32, i32, i32, f64)>, (i32, i32, i32, i32, f64)) =
                         findparents(
@@ -452,13 +541,14 @@ fn main() {
                             &sorted_dams,
                             &ages,
                             &inform,
+                            &min_informative,
+                            &min_discovery,
+                            &max_veri_errors,
+                            &discovery_acc,
+                            &min_par_age,
                         );
-                    //if sire_res.len() > 0 {
                     tx.send((*ban, sire_res)).expect("Thread error");
-                    //}
-                    //if dam_res.len() > 0 {
                     txd.send((*ban, dam_res)).expect("Thread error");
-                    //}
                 }
             }
         }
@@ -477,9 +567,16 @@ fn main() {
 
     let fout = File::create("parentage_rust.csv").expect("Couldn't create file");
     let mut owrite = BufWriter::new(fout);
-    let header = "Animal_Key,Sire_Verification_Code,Dam_Verification_Code,Number_Sire_Matches,Number_Dam_Matches,Sire_Match_1,Sire_Match_1_Number_Informative_SNP,Sire_Match_1_Pass_Rate,Dam_Match_1,Dam_Match_1_Number_Informative_SNP,Dam_Match_1_Pass_Rate,Sire_Match_2,Sire_Match_2_Number_Informative_SNP,Sire_Match_2_Pass_Rate,Dam_Match_2,Dam_Match_2_Number_Informative_SNP,Dam_Match_2_Pass_Rate";
-    let debug_txt = if debug_mode { ",Ped_Sire,Ped_Dam" } else { "" };
-    write!(owrite, "{}{}\n", header, debug_txt).expect("Can't write header");
+    write!(owrite, "Animal_Key,Sire_Verification_Code,Dam_Verification_Code,Number_Sire_Matches,Number_Dam_Matches").expect("Can't write header");
+    //let header = ",Sire_Match_1,Sire_Match_1_Number_Informative_SNP,Sire_Match_1_Pass_Rate,Dam_Match_1,Dam_Match_1_Number_Informative_SNP,Dam_Match_1_Pass_Rate,Sire_Match_2,Sire_Match_2_Number_Informative_SNP,Sire_Match_2_Pass_Rate,Dam_Match_2,Dam_Match_2_Number_Informative_SNP,Dam_Match_2_Pass_Rate,Trio_Verification_Result,Trio_Verification_Sample_Swap_Check,Trio_Verification_Number_Informative_SNP,Trio_Verification_Pass_Rate";
+    for i in 1..9 {
+        write!(owrite, ",Sire_Match_{},Sire_Match_{}_Number_Informative_SNP,Sire_Match_{}_Pass_Rate,Dam_Match_{},Dam_Match_{}_Number_Informative_SNP,Dam_Match_{}_Pass_Rate",i,i,i,i,i,i).expect("Can't write header");
+    }
+    write!(owrite,",Trio_Verification_Result,Trio_Verification_Sample_Swap_Check,Trio_Verification_Number_Informative_SNP,Trio_Verification_Pass_Rate").expect("Can't write header");
+    if debug_mode {
+        write!(owrite, ",Ped_Sire,Ped_Dam,Trio").expect("Can't write header");
+    }
+    write!(owrite, "\n").expect("Can't write header");
 
     for an in anmls_list {
         if let Some(fam) = ped.get(&an) {
@@ -487,6 +584,11 @@ fn main() {
             let mut my_dams: Vec<(i32, i32, i32, i32, f64)> = vec![];
             let mut ped_sire_res: (i32, i32, i32, i32, f64) = (0, 0, 0, 0, 0.0);
             let mut ped_dam_res: (i32, i32, i32, i32, f64) = (0, 0, 0, 0, 0.0);
+            let mut tswap = 0;
+            let mut trio_check = -1;
+            let mut trio: (i32, i32, f64) = (0, 0, 0.0);
+            let childidx = &anml_lookup.get(&an).unwrap();
+            let child_inform = inform[**childidx];
             if let Some(sires) = results.get(&an) {
                 my_sires = sires.0.clone();
                 my_sires.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -497,22 +599,59 @@ fn main() {
                 my_dams.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
                 ped_dam_res = dams.1;
             }
-            let ped_sire = fam.0;
-            let ped_dam = fam.1;
-            let savail = anml_lookup.contains_key(&ped_sire);
-            let davail = anml_lookup.contains_key(&ped_dam);
+            if my_sires.len() > 0 && my_dams.len() > 0 {
+                let childp: &Vec<i8> = &genotypes[**childidx];
+                let child_error = (f64::from(child_inform) * (1.0 - trio_acc)) as i32;
+                for s in &my_sires {
+                    let sirep: &Vec<i8> = &genotypes[*anml_lookup.get(&s.0).unwrap()];
+                    for d in &my_dams {
+                        let trio_res = trio_test_log(
+                            sirep,
+                            &genotypes[*anml_lookup.get(&d.0).unwrap()],
+                            childp,
+                            &child_error,
+                        );
+                        //println!("{:?}", trio_res);
+                        if trio_res.0 {
+                            let pass_rate =
+                                f64::from(child_inform - trio_res.1) / f64::from(child_inform);
+                            trio = (s.0, d.0, pass_rate);
+                            trio_check = 1;
+                        } else {
+                            let trio_res = trio_test_log(
+                                sirep,
+                                childp,
+                                &genotypes[*anml_lookup.get(&d.0).unwrap()],
+                                &child_error,
+                            );
+                            if trio_res.0 {
+                                tswap = 1;
+                                let pass_rate =
+                                    f64::from(child_inform - trio_res.1) / f64::from(child_inform);
+                                trio = (s.0, d.0, pass_rate);
+                                trio_check = 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let ped_sire: i32 = fam.0;
+            let ped_dam: i32 = fam.1;
+            let savail: bool = anml_lookup.contains_key(&ped_sire);
+            let davail: bool = anml_lookup.contains_key(&ped_dam);
             write!(
                 owrite,
                 "{},{},{},{},{}",
                 an,
                 savail as i32,
                 davail as i32,
-                my_sires.len(),
-                my_dams.len()
+                &my_sires.len(),
+                &my_dams.len()
             )
             .expect("Can't write to file");
 
-            for i in 0..2 {
+            for i in 0..8 {
                 if let Some(smatch) = my_sires.get(i) {
                     write!(owrite, ",{},{},{}", smatch.0, smatch.1 + smatch.2, smatch.4)
                         .expect("Can't write to file");
@@ -526,14 +665,26 @@ fn main() {
                     write!(owrite, ",0,0,0").expect("Can't write to file");
                 }
             }
+            if trio_check == 1 {
+                write!(
+                    owrite,
+                    ",{},{},{},{}",
+                    trio_check, tswap, child_inform, trio.2
+                )
+                .expect("Can't write to file");
+            } else {
+                write!(owrite, ",NA,NA,0,0").expect("Can't write to file");
+            }
+
             if debug_mode {
-                let dsire = format!("{:?}", ped_sire_res)
+                let dsire: String = format!("{:?}", ped_sire_res)
                     .replace(",", "|")
                     .replace(" ", "");
-                let ddam = format!("{:?}", ped_dam_res)
+                let ddam: String = format!("{:?}", ped_dam_res)
                     .replace(",", "|")
                     .replace(" ", "");
-                write!(owrite, ",{},{}", dsire, ddam).expect("Can't write to file");
+                let dtrio: String = format!("{:?}", trio).replace(",", "|").replace(" ", "");
+                write!(owrite, ",{},{},{}", dsire, ddam, dtrio).expect("Can't write to file");
             }
             write!(owrite, "\n").expect("Can't write to file");
         }
