@@ -1,5 +1,11 @@
 #![feature(portable_simd)]
 #![feature(let_chains)]
+mod io_gsbin;
+use io_gsbin::*;
+mod algorithms;
+use algorithms::*;
+mod find_parents;
+use find_parents::*;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
@@ -11,335 +17,16 @@ use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::{BufWriter, Read, Write};
-use std::simd::prelude::*;
 use std::sync::mpsc;
 use std::time::Instant;
-const LANES: usize = 64;
 const MINMARKERS: i32 = 90;
-//const MAXERRORS: f64 = 0.03;
 const DISCOVERY_ACC: f64 = 0.99;
-//const POSMATCH: f64 = 0.97;
 const DISCOVERY: i32 = 300;
 const VER_MAX_ERR: i32 = 3;
 const MIN_INF_MARKERS: i32 = 20;
-const MAX_MARKERS: usize = 1907;
+//const MAX_MARKERS: usize = 1907;
 const TRIO_ERROR: f64 = 0.04;
 const MIN_PAR_AGE: i16 = 2;
-const RR: i8 = -1;
-const RA: i8 = 0;
-const AA: i8 = 1;
-const MS: i8 = 0;
-
-fn expand_i32_to_u8_pairs_lsb(input: i32) -> [u8; 16] {
-    let mut result = [0u8; 16];
-    // Iterate over the 16 pairs of bits in the i32
-    for i in 0..16 {
-        // Extract the two least significant bits for each u8
-        let pair_of_bits = ((input >> (2 * i)) & 0b11) as u8;
-        // Store the pair in the result array
-        result[i] = pair_of_bits;
-    }
-    result
-}
-
-#[inline]
-fn gtconv(gt: u8) -> (i8, i32) {
-    match gt {
-        0 => (RR, 1),
-        1 => (RA, 1),
-        2 => (AA, 1),
-        _ => (MS, 0),
-    }
-}
-
-#[inline]
-fn htsconv(gt: &[i32]) -> (i8, i32) {
-    match gt {
-        [2, 2] => (RR, 1),
-        [2, 4] => (RA, 1),
-        [4, 4] => (AA, 1),
-        //"0|0" => return (-1i8, 1),
-        //"0|1" => return (0i8, 1),
-        //"1|0" => return (0i8, 1),
-        //"1|1" => return (1i8, 1),
-        _ => (MS, 0),
-    }
-}
-
-fn bytes_to_gts(profile_bytes: &[u8]) -> (Vec<i8>, i32) {
-    let mut snp_start = 0;
-    let mut end = snp_start + 4;
-    let mut snps = 0;
-    let mut gtp: Vec<i8> = Vec::with_capacity(1920);
-    let mut informative = 0;
-    while snps < 1920 {
-        let res0 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
-        snp_start += 4;
-        end += 4;
-        let res1 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
-        snp_start += 4;
-        end += 4;
-        let res2 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
-        snp_start += 4;
-        end += 4;
-        let res3 = i32::from_le_bytes(profile_bytes[snp_start..end].try_into().expect("nope"));
-        snp_start += 4;
-        end += 4;
-        let gts0 = expand_i32_to_u8_pairs_lsb(res0)
-            .into_iter()
-            .map(gtconv)
-            .collect::<Vec<(i8, i32)>>();
-        let gts1 = expand_i32_to_u8_pairs_lsb(res1)
-            .into_iter()
-            .map(gtconv)
-            .collect::<Vec<(i8, i32)>>();
-        let gts2 = expand_i32_to_u8_pairs_lsb(res2)
-            .into_iter()
-            .map(gtconv)
-            .collect::<Vec<(i8, i32)>>();
-        let gts3 = expand_i32_to_u8_pairs_lsb(res3)
-            .into_iter()
-            .map(gtconv)
-            .collect::<Vec<(i8, i32)>>();
-
-        for i in 0..16 {
-            gtp.push(gts0[i].0);
-            gtp.push(gts1[i].0);
-            gtp.push(gts2[i].0);
-            gtp.push(gts3[i].0);
-            snps += 4;
-            informative += gts0[i].1;
-            informative += gts1[i].1;
-            informative += gts2[i].1;
-            informative += gts3[i].1;
-        }
-    }
-    (gtp[0..1907].to_vec(), informative)
-}
-
-fn read_gs(gsfile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
-    let mut fbin = File::open(gsfile).expect("can't read");
-    let mut buffer = [0u8; 4];
-    let mut meta: Vec<usize> = vec![0; 4];
-
-    /* Load the metadata [Animal Num, Markers, Packed Markers, Blocks] */
-    for i in 0..meta.len() {
-        fbin.read_exact(&mut buffer).expect("Can't read file");
-        meta[i] = i32::from_le_bytes(buffer) as usize;
-    }
-
-    let mut anml_idx = vec![0; meta[0]];
-
-    let mut anml_lookup: HashMap<i32, usize> = HashMap::with_capacity(meta[0]);
-    /* Store the animal ids by index */
-    eprintln!("Indexing animals");
-    for i in 0..meta[0] {
-        fbin.read_exact(&mut buffer).expect("Can't read file");
-        anml_idx[i] = i32::from_le_bytes(buffer);
-        anml_lookup.insert(anml_idx[i], i);
-    }
-
-    /* Read the genotypes, convert and store */
-    let mut mygts: Vec<Vec<i8>> = vec![Vec::with_capacity(meta[2]); meta[0]];
-    let mut inform: Vec<i32> = vec![0; meta[0]];
-    let mut profile_buffer = [0u8; 480];
-
-    for an in 0..meta[0] {
-        fbin.read_exact(&mut profile_buffer)
-            .expect("Can't write file");
-        (mygts[an], inform[an]) = bytes_to_gts(&profile_buffer);
-        //let anpro = bytes_to_gts(&profile_buffer);
-        //mygts[an] = anpro.0;
-        //inform[an] = anpro.1;
-    }
-    eprintln!("Read BIN");
-    (anml_lookup, mygts, inform)
-}
-
-fn read_vcf(vcffile: String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) {
-    use rust_htslib::bcf::{Read, Reader};
-    let mut bcf = Reader::from_path(vcffile).expect("Error opening file.");
-    let _ = bcf.set_threads(6);
-    let sample_count = usize::try_from(bcf.header().sample_count()).unwrap();
-    let mut anml_lookup: HashMap<i32, usize> = HashMap::with_capacity(sample_count);
-    let mut genotypes: Vec<Vec<i8>> = vec![Vec::with_capacity(MAX_MARKERS); sample_count];
-    let mut inform: Vec<i32> = vec![0; sample_count];
-    eprintln!("Indexing animals");
-    let vcf_samples: Vec<&str> = bcf
-        .header()
-        .samples()
-        .into_iter()
-        .map(|x| std::str::from_utf8(x).expect("err"))
-        .collect();
-    for sample_idx in 0..sample_count {
-        anml_lookup.insert(
-            vcf_samples[sample_idx]
-                .parse::<i32>()
-                .expect("conversion error"),
-            sample_idx,
-        );
-    }
-    eprintln!("Starting GT load");
-
-    for record in bcf.records().map(|r| r.expect("No record")) {
-        let gts: Vec<(i8, i32)> = record
-            .format(b"GT")
-            .integer()
-            .expect("GTs error")
-            .to_vec()
-            .iter()
-            .map(|a| htsconv(a))
-            .collect();
-        for (mygt, sample_index) in gts.iter().zip(0..sample_count) {
-            inform[sample_index] += mygt.1;
-            genotypes[sample_index].push(mygt.0);
-        }
-    }
-
-    eprintln!("Read VCF");
-    (anml_lookup, genotypes, inform)
-}
-
-#[inline(always)]
-fn vec_pars(child: &[i8], parent: &[i8], max_err: &i32) -> (i32, i32, i32, f64) {
-    let mut start: usize = 0;
-    let mut end: usize = LANES;
-    let mut suminf: i32 = 0;
-    let mut sumdifinf: i32 = 0;
-    let mut fails: i32 = 0;
-    let tmperror: i32 = max_err * 2;
-    let inc: usize = LANES;
-    let psize: usize = child.len();
-    let psi = psize as i32;
-
-    while end < psize && fails < tmperror {
-        let cvec: Simd<i8, LANES> = Simd::<i8, LANES>::from_slice(&child[start..end]);
-        let pvec: Simd<i8, LANES> = Simd::<i8, LANES>::from_slice(&parent[start..end]);
-        suminf += i32::from((cvec.abs() * pvec.abs()).reduce_sum());
-        sumdifinf += i32::from((cvec * pvec).reduce_sum());
-        fails = suminf - sumdifinf;
-        end += inc;
-        start += inc;
-    }
-
-    while start < psize && fails < tmperror {
-        suminf += i32::from(child[start].abs() * parent[start].abs());
-        sumdifinf += i32::from(child[start] * parent[start]);
-        fails = suminf - sumdifinf;
-        start += 1;
-    }
-
-    fails = fails / 2;
-    let uninf = psi - suminf; // as i32;
-    let goodm = psi - (uninf + fails); // as i32;
-    (
-        goodm,
-        fails,
-        suminf,
-        f64::from(goodm) / f64::from(goodm + fails),
-    )
-}
-
-#[inline(always)]
-fn agecheck(kid: &i16, par: &i16, min_age: &i16) -> bool {
-    *kid - *par >= *min_age
-}
-
-fn trio_test_log(sirep: &[i8], damp: &[i8], childp: &[i8], maxfails: &i32) -> (bool, i32) {
-    let mut fails = 0;
-    let mut pass = 0;
-    let mut valid_trio = true;
-    for i in 0..childp.len() {
-        let sgt = sirep[i];
-        let dgt = damp[i];
-        let cgt = childp[i];
-
-        if cgt == RA && ((sgt == RR && dgt == AA) || (sgt == AA && dgt == RR)) {
-            pass += 1;
-        } else {
-            if cgt == RA && ((sgt == RR && dgt == RR) || (sgt == AA && dgt == AA)) {
-                fails += 1;
-            } else {
-                if (cgt == RR && sgt == RR && dgt == RR) || (cgt == AA && sgt == AA && dgt == AA) {
-                    pass += 1
-                }
-            }
-        }
-
-        if fails > *maxfails {
-            valid_trio = false;
-            break;
-        }
-    }
-
-    (valid_trio, fails)
-}
-
-/* Need, child, childgt, popmap, popgt, errors, ages,parent list*/
-fn findparents(
-    child: i32,
-    childgt: &[i8],
-    ped_parent: &i32,
-    popmap: &HashMap<i32, usize>,
-    pop_gts: &Vec<Vec<i8>>,
-    allowed_errors: &i32,
-    pos_parents: &Vec<(i16, i32, usize)>,
-    ages: &HashMap<i32, i16>,
-    inform_snp: &Vec<i32>,
-    min_informative: &i32,
-    discover_snp: &i32,
-    max_veri_error: &i32,
-    discovery_acc: &f64,
-    min_age: &i16,
-) -> (Vec<(i32, i32, i32, i32, f64)>, (i32, i32, i32, i32, f64)) {
-    /* For possible parents First check pedpar if it matches return
-        Otherwise if age is correct and parent has enough markers then parent match
-    */
-    let mut used_markers: i32 = 0;
-    let mut ped_match: (i32, i32, i32, i32, f64) = (0, 0, 0, 0, 0.0);
-    let cage: &i16 = ages.get(&child).unwrap();
-    let mut matches: Vec<(i32, i32, i32, i32, f64)> = Vec::with_capacity(2);
-    let mut global: bool = true;
-    if *ped_parent != 0
-        && let Some(paridx) = popmap.get(ped_parent)
-    {
-        let pargt: &Vec<i8> = //pop_gts.get(*paridx as usize).expect("couldn't unwrap");
-            &pop_gts[*paridx];
-        let my_pedpar: (i32, i32, i32, f64) = vec_pars(&childgt, &pargt, allowed_errors);
-        ped_match = (
-            *ped_parent,
-            my_pedpar.0,
-            my_pedpar.1,
-            my_pedpar.2,
-            my_pedpar.3,
-        );
-        let used_markers = my_pedpar.0 + my_pedpar.1;
-        if my_pedpar.1 <= *max_veri_error && used_markers >= *min_informative {
-            matches.push(ped_match);
-            global = false;
-            return (matches, ped_match);
-        }
-    }
-
-    if global {
-        for par in pos_parents {
-            if child != par.1 {
-                if inform_snp[par.2] >= *discover_snp {
-                    if agecheck(cage, &par.0, &min_age) {
-                        let pos_par = vec_pars(&childgt, &pop_gts[par.2], &allowed_errors);
-                        used_markers = pos_par.0 + pos_par.1;
-                        if pos_par.3 >= *discovery_acc && used_markers >= *min_informative {
-                            matches.push((par.1, pos_par.0, pos_par.1, pos_par.2, pos_par.3));
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    (matches, ped_match)
-}
 
 fn main() {
     eprintln!("Rust Parent Match\nChad S. Harland\n Copyright (c) 2024");
@@ -368,7 +55,6 @@ fn main() {
     let mut min_informative = MIN_INF_MARKERS;
     let mut max_veri_errors = VER_MAX_ERR;
     let mut discovery_acc = DISCOVERY_ACC;
-    //let mut pos_match = POSMATCH;
     let mut min_discovery = DISCOVERY;
     let mut trio_acc = TRIO_ERROR;
     let mut min_par_age = MIN_PAR_AGE;
@@ -409,14 +95,7 @@ fn main() {
     let ped_file: &String = &args[2];
     let anmls_file: &String = &args[3];
 
-    let myreader: fn(String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) =
-        if gtfile.contains(".bin") {
-            println!("GS file enabled");
-            read_gs
-        } else {
-            println!("Reading VCF file");
-            read_vcf
-        };
+    let myreader: fn(String) -> (HashMap<i32, usize>, Vec<Vec<i8>>, Vec<i32>) = read_gs;
 
     let (anml_lookup, genotypes, inform) = myreader(gtfile.to_string());
 
